@@ -7,14 +7,14 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, s64);
 	__uint(max_entries, MAX_OS_THREADS);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } goroutines_map SEC(".maps");
 
 struct http_request_t {
-    u64 goroutine;
+    s64 goroutine;
     char method[MAX_SIZE];
     char path[MAX_SIZE];
 };
@@ -67,18 +67,23 @@ int uprobe_ServerMux_ServeHTTP(struct pt_regs *ctx) {
     bpf_probe_read(&httpReq.path, path_size, path_ptr);
 
     // Record goroutine
-    u32 current_thread = bpf_get_current_pid_tgid();
-    u64* goid_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
-    bpf_probe_read(&httpReq.goroutine, sizeof(httpReq.goroutine), goid_ptr);
-//    u32 current_thread = bpf_get_current_pid_tgid();
-//    struct task_struct *task;
-//    __u64 task_ptr = bpf_get_current_task();
-//    bpf_probe_read(task, sizeof(struct task_struct), (void*)(task_ptr));
-//    __u64  goid;
-//    size_t g_addr;
-//    bpf_probe_read_user(&g_addr, sizeof(void *), (void*)(task->thread.fsbase - 8));
-//    bpf_probe_read_user(&goid, sizeof(void *), (void*)(g_addr + 152));
-//    bpf_printk("net.http called for thread %d with goid %d \n", current_thread, goid);
+    u64 current_thread = bpf_get_current_pid_tgid();
+    void* goid_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
+    s64 goid;
+    bpf_probe_read(&goid, sizeof(goid), goid_ptr);
+    bpf_printk("http saw goid %d\n",goid);
+//    u64 current_thread = bpf_get_current_pid_tgid();
+//    void* g_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
+//    void* g;
+//    bpf_probe_read(&g, sizeof(g), g_ptr);
+//    void* m;
+//    bpf_probe_read(&m, sizeof(m), g + 48);
+//    void* curg;
+//    bpf_probe_read(&curg, sizeof(curg), m + 192);
+//    s64 goid;
+//    bpf_probe_read(&goid, sizeof(goid), curg + 152);
+//    httpReq.goroutine = goid;
+      httpReq.goroutine = goid;
 
     // Write event
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &httpReq, sizeof(httpReq));

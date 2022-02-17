@@ -7,14 +7,14 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, s64);
 	__uint(max_entries, MAX_OS_THREADS);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } goroutines_map SEC(".maps");
 
 struct grpc_request_t {
-    u64 goroutine;
+    s64 goroutine;
     char method[MAX_SIZE];
     char target[MAX_SIZE];
 };
@@ -58,9 +58,21 @@ int uprobe_ClientConn_Invoke(struct pt_regs *ctx) {
     bpf_probe_read(&grpcReq.target, target_size, target_ptr);
 
     // Record goroutine
-    u32 current_thread = bpf_get_current_pid_tgid();
-    u64* goid_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
-    bpf_probe_read(&grpcReq.goroutine, sizeof(grpcReq.goroutine), goid_ptr);
+    u64 current_thread = bpf_get_current_pid_tgid();
+    void* goid_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
+    s64 goid;
+    bpf_probe_read(&goid, sizeof(goid), goid_ptr);
+    bpf_printk("grpc saw goid %d\n",goid);
+//    void* g;
+//    bpf_probe_read(&g, sizeof(g), g_ptr);
+//    void* m;
+//    bpf_probe_read(&m, sizeof(m), g + 48);
+//    void* curg;
+//    bpf_probe_read(&curg, sizeof(curg), m + 192);
+//    s64 goid;
+//    bpf_probe_read(&goid, sizeof(goid), curg + 152);
+//    grpcReq.goroutine = goid;
+      grpcReq.goroutine = goid;
 //    bpf_printk("grpc.invoke called for thread %d \n", current_thread);
 
     // Write event
