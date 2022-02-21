@@ -7,6 +7,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
@@ -45,8 +46,30 @@ func (h *httpServerInstrumentor) FuncNames() []string {
 }
 
 func (h *httpServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
+	spec, err := ctx.Injector.Inject(loadBpf, "go", ctx.TargetDetails.GoVersion.Original(), []*inject.InjectStructField{
+		{
+			VarName:    "method_ptr_pos",
+			StructName: "net/http.Request",
+			Field:      "Method",
+		},
+		{
+			VarName:    "url_ptr_pos",
+			StructName: "net/http.Request",
+			Field:      "URL",
+		},
+		{
+			VarName:    "path_ptr_pos",
+			StructName: "net/url.URL",
+			Field:      "Path",
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
 	h.bpfObjects = &bpfObjects{}
-	err := loadBpfObjects(h.bpfObjects, &ebpf.CollectionOptions{
+	err = spec.LoadAndAssign(h.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: bpffs.GoRoutinesMapDir,
 		},

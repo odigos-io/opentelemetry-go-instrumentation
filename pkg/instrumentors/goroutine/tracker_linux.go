@@ -3,6 +3,7 @@ package goroutine
 import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
@@ -32,10 +33,6 @@ func (g *Tracker) FuncNames() []string {
 }
 
 func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
-	log.Logger.Info("calculated offsets", "offsets", ctx.TargetDetails.Functions)
-
-	g.bpfObjects = &bpfObjects{}
-
 	err := g.mountBpfFS()
 	if err != nil {
 		return err
@@ -45,16 +42,23 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 		return err
 	}
 
-	if err := loadBpfObjects(g.bpfObjects, &ebpf.CollectionOptions{
-		Maps: ebpf.MapOptions{
-			PinPath: bpffs.GoRoutinesMapDir,
+	spec, err := ctx.Injector.Inject(loadBpf, "go", ctx.TargetDetails.GoVersion.Original(), []*inject.InjectStructField{
+		{
+			VarName:    "guid_pos",
+			StructName: "runtime.g",
+			Field:      "goid",
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
-	goIdOffset := uint64(152) // TOOD: Get from version2goId
-	err = g.bpfObjects.OffsetMap.Update(uint32(0), goIdOffset, ebpf.UpdateAny)
+	g.bpfObjects = &bpfObjects{}
+	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
+		Maps: ebpf.MapOptions{
+			PinPath: bpffs.GoRoutinesMapDir,
+		},
+	})
 	if err != nil {
 		return err
 	}

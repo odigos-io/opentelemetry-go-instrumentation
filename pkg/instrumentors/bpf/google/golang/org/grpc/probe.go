@@ -7,6 +7,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
@@ -45,8 +46,24 @@ func (g *grpcInstrumentor) FuncNames() []string {
 }
 
 func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
+	libVersion, exists := ctx.TargetDetails.Libraries[g.LibraryName()]
+	if !exists {
+		libVersion = ""
+	}
+	spec, err := ctx.Injector.Inject(loadBpf, g.LibraryName(), libVersion, []*inject.InjectStructField{
+		{
+			VarName:    "clientconn_target_ptr_pos",
+			StructName: "google.golang.org/grpc.ClientConn",
+			Field:      "target",
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
 	g.bpfObjects = &bpfObjects{}
-	err := loadBpfObjects(g.bpfObjects, &ebpf.CollectionOptions{
+	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: bpffs.GoRoutinesMapDir,
 		},
