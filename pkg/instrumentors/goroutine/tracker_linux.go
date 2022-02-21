@@ -60,7 +60,7 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	var uprobeObj *ebpf.Program
-	if ctx.TargetDetails.RegistersABI {
+	if ctx.TargetDetails.IsRegistersABI() {
 		// TODO
 	} else {
 		uprobeObj = g.bpfObjects.UprobeRuntimeCasgstatus

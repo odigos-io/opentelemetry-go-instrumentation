@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/process"
@@ -43,6 +44,11 @@ func (m *instrumentorsManager) load(target *process.TargetDetails) error {
 		return err
 	}
 
+	injector, err := inject.New()
+	if err != nil {
+		return err
+	}
+
 	exe, err := link.OpenExecutable(fmt.Sprintf("/proc/%d/exe", target.PID))
 	if err != nil {
 		return err
@@ -50,6 +56,7 @@ func (m *instrumentorsManager) load(target *process.TargetDetails) error {
 	ctx := &context.InstrumentorContext{
 		TargetDetails: target,
 		Executable:    exe,
+		Injector:      injector,
 	}
 
 	// Load instrumentors

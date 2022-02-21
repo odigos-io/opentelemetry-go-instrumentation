@@ -61,7 +61,7 @@ func (h *httpServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	var uprobeObj *ebpf.Program
-	if ctx.TargetDetails.RegistersABI {
+	if ctx.TargetDetails.IsRegistersABI() {
 		uprobeObj = h.bpfObjects.UprobeServerMuxServeHTTP_ByRegisters
 	} else {
 		uprobeObj = h.bpfObjects.UprobeServerMuxServeHTTP

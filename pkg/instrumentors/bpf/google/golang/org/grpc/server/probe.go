@@ -7,6 +7,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
@@ -44,8 +45,25 @@ func (g *grpcServerInstrumentor) FuncNames() []string {
 }
 
 func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
+	targetLib := "google.golang.org/grpc"
+	libVersion, exists := ctx.TargetDetails.Libraries[targetLib]
+	if !exists {
+		libVersion = ""
+	}
+	spec, err := ctx.Injector.Inject(loadBpf, "google.golang.org/grpc", libVersion, []*inject.InjectStructField{
+		{
+			VarName:    "stream_method_ptr_pos",
+			StructName: "google.golang.org/grpc/internal/transport.Stream",
+			Field:      "method",
+		},
+	})
+
+	if err != nil {
+		return err
+	}
+
 	g.bpfObjects = &bpfObjects{}
-	err := loadBpfObjects(g.bpfObjects, &ebpf.CollectionOptions{
+	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: bpffs.GoRoutinesMapDir,
 		},
@@ -60,7 +78,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	var uprobeObj *ebpf.Program
-	if ctx.TargetDetails.RegistersABI {
+	if ctx.TargetDetails.IsRegistersABI() {
 		uprobeObj = g.bpfObjects.UprobeServerHandleStreamByRegisters
 	} else {
 		uprobeObj = g.bpfObjects.UprobeServerHandleStream

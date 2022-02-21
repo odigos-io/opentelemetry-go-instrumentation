@@ -61,7 +61,7 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	var uprobeObj *ebpf.Program
-	if ctx.TargetDetails.RegistersABI {
+	if ctx.TargetDetails.IsRegistersABI() {
 		uprobeObj = g.bpfObjects.UprobeClientConnInvokeByRegisters
 	} else {
 		uprobeObj = g.bpfObjects.UprobeClientConnInvoke
