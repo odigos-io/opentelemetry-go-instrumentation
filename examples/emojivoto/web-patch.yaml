@@ -20,14 +20,14 @@ spec:
                 - SYS_PTRACE
             privileged: true
           volumeMounts:
-            - mountPath: /sys/fs/bpf
-              name: bpf-fs
+#            - mountPath: /sys/fs/bpf
+#              name: bpf-fs
             - mountPath: /sys/kernel/debug
               name: kernel-debug
       volumes:
         - name: kernel-debug
           hostPath:
             path: /sys/kernel/debug
-        - name: bpf-fs
-          hostPath:
-            path: /sys/fs/bpf
+#        - name: bpf-fs
+#          hostPath:
+#            path: /sys/fs/bpf

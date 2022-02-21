@@ -44,7 +44,7 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 
 	spec, err := ctx.Injector.Inject(loadBpf, "go", ctx.TargetDetails.GoVersion.Original(), []*inject.InjectStructField{
 		{
-			VarName:    "guid_pos",
+			VarName:    "goid_pos",
 			StructName: "runtime.g",
 			Field:      "goid",
 		},
@@ -65,7 +65,7 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 
 	var uprobeObj *ebpf.Program
 	if ctx.TargetDetails.IsRegistersABI() {
-		// TODO
+		uprobeObj = g.bpfObjects.UprobeRuntimeCasgstatusByRegisters
 	} else {
 		uprobeObj = g.bpfObjects.UprobeRuntimeCasgstatus
 	}
