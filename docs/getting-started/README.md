@@ -108,6 +108,19 @@ After selecting the emojivoto-voting service, you should see the following trace
 
 Each trace should contain data according to the OpenTelemetry specification, for example: gRPC method names, start and end timestamps, and even the goroutine id.
 
+Notice that we did not change the emojivoto-voting application to use OpenTelemetry. This is the exact same container that we usde earlier.
+
+## Next Steps
+
+Instrumenting other applications is easy:
+
+- Modify the patch file to match your application by setting the `OTEL_TARGET_EXE`,`OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` environment variables.
+- Apply the modified patched file:
+
+```shell
+kubectl patch deployment <deployment-name> --patch-file <modified-patch-file>
+```
+
 ## Cleanup
 
 Delete the Kubernetes cluster:
