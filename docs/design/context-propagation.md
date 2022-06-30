@@ -109,7 +109,7 @@ func main() {
 }
 ```
 
-By running a [modified version]() of the automatic instrumentation, we can see that the headers are set by the instrumentation successfully:
+By running a [modified version](https://github.com/edeNFed/opentelemetry-go-instrumentation/tree/ebpf-write-poc) of the automatic instrumentation, we can see that the headers are set by the instrumentation successfully:
 
 ```
 ❯ go run main.go
