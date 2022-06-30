@@ -1,4 +1,4 @@
-# Design Proposal: Integration with manual instrumentation
+# Design Proposal: Integration with Manual Instrumentation
 
 ## Motivation
 
