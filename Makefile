@@ -2,6 +2,7 @@
 # Assume the Makefile is in the root of the repository.
 REPODIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
+# Build the list of include directories to compile the bpf program
 BPF_INCLUDE += -I${REPODIR}/include/libbpf
 BPF_INCLUDE += -I${REPODIR}/include
 
