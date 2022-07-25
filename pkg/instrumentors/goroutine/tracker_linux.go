@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags ${CCINCLUDE} bpf ./bpf/tracker.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/tracker.bpf.c
 
 type Tracker struct {
 	bpfObjects *bpfObjects

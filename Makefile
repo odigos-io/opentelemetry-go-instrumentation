@@ -4,10 +4,10 @@ REPODIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 # Build the list of include directories to compile the bpf program
 BPF_INCLUDE += -I${REPODIR}/include/libbpf
-BPF_INCLUDE += -I${REPODIR}/include
+BPF_INCLUDE+= -I${REPODIR}/include
 
 .PHONY: generate
-generate: export CCINCLUDE := $(BPF_INCLUDE)
+generate: export CFLAGS := $(BPF_INCLUDE)
 generate:
 	go mod tidy
 	go generate ./...
