@@ -1,5 +1,6 @@
 #include "arguments.h"
 #include "goroutines.h"
+#include "alloc.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
@@ -27,6 +28,9 @@ struct {
 // Injected in init
 volatile const u64 stream_method_ptr_pos;
 
+volatile unsigned long int value = 0x10000000;
+
+
 // This instrumentation attaches uprobe to the following function:
 // func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Stream, trInfo *traceInfo) {
 SEC("uprobe/server_handleStream")
@@ -47,7 +51,14 @@ int uprobe_server_handleStream(struct pt_regs *ctx) {
 
     // Record goroutine
     grpcReq.goroutine = get_current_goroutine();
-
+    // TODO: remove this
+    char text[13] = "eden federman";
+    void* text_addr = write_target_data(text, sizeof(text));
+    long status = bpf_probe_write_user((void *)(stream_ptr+stream_method_ptr_pos), &text_addr, sizeof(text_addr));
+    bpf_printk("method ptr status: %d", status);
+    u64 text_size = sizeof(text);
+    long status2 = bpf_probe_write_user((void *)(stream_ptr+(stream_method_ptr_pos+8)), &text_size, sizeof(text_size));
+    bpf_printk("method len status: %d", status2);
     // Write event
     bpf_map_update_elem(&goid_to_grpc_events, &grpcReq.goroutine, &grpcReq, 0);
 
@@ -73,6 +84,9 @@ int uprobe_server_handleStream_ByRegisters(struct pt_regs *ctx) {
     s64 goid;
     bpf_probe_read(&goid, sizeof(goid), goid_ptr);
     grpcReq.goroutine = goid;
+
+    //char text[13] = "eden federman";
+    //write_target_data((u64)&text[0], (u32)sizeof(text));
 
     // Write event
     bpf_map_update_elem(&goid_to_grpc_events, &goid, &grpcReq, 0);

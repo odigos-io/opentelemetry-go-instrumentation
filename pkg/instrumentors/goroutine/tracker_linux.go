@@ -49,7 +49,7 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 			StructName: "runtime.g",
 			Field:      "goid",
 		},
-	})
+	}, false)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (g *Tracker) Load(ctx *context.InstrumentorContext) error {
 }
 
 func (g *Tracker) mountBpfFS() error {
-	_, err := os.Stat(bpffs.BpfFsPath)
+	fi, err := os.Stat(bpffs.BpfFsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(bpffs.BpfFsPath, 0755); err != nil {
@@ -96,6 +96,11 @@ func (g *Tracker) mountBpfFS() error {
 		} else {
 			return err
 		}
+	}
+
+	if fi != nil {
+		// Already mounted
+		return nil
 	}
 
 	return unix.Mount(bpffs.BpfFsPath, bpffs.BpfFsPath, "bpf", 0, "")

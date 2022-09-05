@@ -60,7 +60,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 			StructName: "google.golang.org/grpc/internal/transport.Stream",
 			Field:      "method",
 		},
-	})
+	}, true)
 
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	g.bpfObjects = &bpfObjects{}
 	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
-			PinPath: bpffs.GoRoutinesMapDir,
+			PinPath: bpffs.BpfFsPath,
 		},
 	})
 	if err != nil {

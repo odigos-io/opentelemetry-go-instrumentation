@@ -6,6 +6,7 @@ WORKDIR /app
 COPY . .
 RUN make build
 
-FROM gcr.io/distroless/base-debian11
+# gcr.io/distroless/base-debian11
+FROM ubuntu
 COPY --from=builder /app/kv-go-instrumentation /
 CMD ["/kv-go-instrumentation"]

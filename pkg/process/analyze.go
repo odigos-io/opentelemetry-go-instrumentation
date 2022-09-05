@@ -3,7 +3,9 @@ package process
 import (
 	"debug/elf"
 	"debug/gosym"
+	"errors"
 	"fmt"
+	"github.com/prometheus/procfs"
 	"os"
 
 	"github.com/hashicorp/go-version"
@@ -12,10 +14,16 @@ import (
 )
 
 type TargetDetails struct {
-	PID       int
-	Functions []*Func
-	GoVersion *version.Version
-	Libraries map[string]string
+	PID               int
+	Functions         []*Func
+	GoVersion         *version.Version
+	Libraries         map[string]string
+	AllocationDetails *AllocationDetails
+}
+
+type AllocationDetails struct {
+	Addr    uint64
+	EndAddr uint64
 }
 
 type Func struct {
@@ -49,6 +57,26 @@ func (t *TargetDetails) GetFunctionReturns(name string) ([]uint64, error) {
 	return nil, fmt.Errorf("could not find returns for function %s", name)
 }
 
+func (a *processAnalyzer) findKeyvalMmap(pid int) (uintptr, uintptr) {
+	fs, err := procfs.NewProc(pid)
+	if err != nil {
+		panic(err)
+	}
+
+	maps, err := fs.ProcMaps()
+	if err != nil {
+		panic(err)
+	}
+
+	for _, m := range maps {
+		if m.Perms != nil && m.Perms.Read && m.Perms.Write && m.Perms.Execute {
+			log.Logger.Info("found addr of keyval map", "addr", m.StartAddr)
+			return m.StartAddr, m.EndAddr
+		}
+	}
+	panic(errors.New("cant find keyval map"))
+}
+
 func (a *processAnalyzer) Analyze(pid int, relevantFuncs map[string]interface{}) (*TargetDetails, error) {
 	result := &TargetDetails{
 		PID: pid,
@@ -71,6 +99,17 @@ func (a *processAnalyzer) Analyze(pid int, relevantFuncs map[string]interface{})
 	}
 	result.GoVersion = goVersion
 	result.Libraries = modules
+
+	//addr, err := a.findAllocOffset(allocSec, elfF)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	start, end := a.findKeyvalMmap(pid)
+	result.AllocationDetails = &AllocationDetails{
+		Addr:    uint64(start),
+		EndAddr: uint64(end),
+	}
 
 	var pclndat []byte
 	if sec := elfF.Section(".gopclntab"); sec != nil {
@@ -112,6 +151,20 @@ func (a *processAnalyzer) Analyze(pid int, relevantFuncs map[string]interface{})
 
 	return result, nil
 }
+
+//func (a *processAnalyzer) findAllocOffset(allocSec *elf.Section, elfF *elf.File) (uint64, error) {
+//	for _, prog := range elfF.Progs {
+//		if prog.Type != elf.PT_LOAD || (prog.Flags&elf.PF_X) == 0 {
+//			continue
+//		}
+//
+//		// For more info on this calculation: stackoverflow.com/a/40249502
+//		if prog.Vaddr <= allocSec.Offset && allocSec.Offset < (prog.Vaddr+prog.Memsz) {
+//			return allocSec.Offset - prog.Vaddr + prog.Off, nil
+//		}
+//	}
+//	return 0, errors.New("could not find allocation offset")
+//}
 
 func (a *processAnalyzer) findFuncOffset(f *gosym.Func, elfF *elf.File) (uint64, []uint64, error) {
 	off := f.Value

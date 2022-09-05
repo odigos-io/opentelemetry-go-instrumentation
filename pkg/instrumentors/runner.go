@@ -59,12 +59,17 @@ func (m *instrumentorsManager) load(target *process.TargetDetails) error {
 		Injector:      injector,
 	}
 
-	// Load instrumentors
+	if err := m.allocator.Load(ctx); err != nil {
+		log.Logger.Error(err, "failed to load allocator")
+		return err
+	}
+
 	if err := m.goroutineTracker.Load(ctx); err != nil {
 		log.Logger.Error(err, "error loading goroutine tracker")
 		return err
 	}
 
+	// Load instrumentors
 	for name, i := range m.instrumentors {
 		log.Logger.V(0).Info("loading instrumentor", "name", name)
 		err := i.Load(ctx)

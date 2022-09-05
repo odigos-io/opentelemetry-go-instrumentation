@@ -2,9 +2,27 @@ spec:
   template:
     spec:
       shareProcessNamespace: true
+      initContainers:
+        - name: copy-launcher
+          image: keyval/launcher:v0.1
+          command:
+            - cp
+            - -a
+            - /kv-launcher/.
+            - /odigos-launcher/
+          volumeMounts:
+            - name: launcherdir
+              mountPath: /odigos-launcher
       containers:
+        - name: voting-svc
+          command:
+            - /odigos-launcher/launch
+            - /usr/local/bin/emojivoto-voting-svc
+          volumeMounts:
+            - mountPath: /odigos-launcher
+              name: launcherdir
         - name: emojivoto-voting-instrumentation
-          image: keyval/otel-go-agent:v0.5.3
+          image: edenfed/otel-go-agent:v0.7
           env:
             - name: OTEL_TARGET_EXE
               value: /usr/local/bin/emojivoto-voting-svc
@@ -22,6 +40,8 @@ spec:
             - mountPath: /sys/kernel/debug
               name: kernel-debug
       volumes:
+        - name: launcherdir
+          emptyDir: {}
         - name: kernel-debug
           hostPath:
             path: /sys/kernel/debug

@@ -2,6 +2,7 @@ package instrumentors
 
 import (
 	"fmt"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/allocator"
 	gorillaMux "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/github.com/gorilla/mux"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc"
 	grpcServer "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc/server"
@@ -19,6 +20,7 @@ type instrumentorsManager struct {
 	done             chan bool
 	incomingEvents   chan *events.Event
 	otelController   *opentelemetry.Controller
+	allocator        *allocator.Allocator
 }
 
 func NewManager(otelController *opentelemetry.Controller) (*instrumentorsManager, error) {
@@ -28,6 +30,7 @@ func NewManager(otelController *opentelemetry.Controller) (*instrumentorsManager
 		incomingEvents:   make(chan *events.Event),
 		otelController:   otelController,
 		goroutineTracker: goroutine.NewTracker(),
+		allocator:        allocator.New(),
 	}
 
 	err := registerInstrumentors(m)
