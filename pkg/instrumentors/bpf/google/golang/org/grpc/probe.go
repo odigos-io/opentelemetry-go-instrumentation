@@ -32,10 +32,11 @@ type GrpcEvent struct {
 }
 
 type grpcInstrumentor struct {
-	bpfObjects   *bpfObjects
-	uprobe       link.Link
-	returnProbs  []link.Link
-	eventsReader *perf.Reader
+	bpfObjects        *bpfObjects
+	uprobe            link.Link
+	returnProbs       []link.Link
+	writeHeadersProbe []link.Link
+	eventsReader      *perf.Reader
 }
 
 func New() *grpcInstrumentor {
@@ -47,7 +48,8 @@ func (g *grpcInstrumentor) LibraryName() string {
 }
 
 func (g *grpcInstrumentor) FuncNames() []string {
-	return []string{"google.golang.org/grpc.(*ClientConn).Invoke"}
+	return []string{"google.golang.org/grpc.(*ClientConn).Invoke",
+		"google.golang.org/grpc/internal/transport.(*http2Client).createHeaderFields"}
 }
 
 func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
@@ -61,7 +63,7 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 			StructName: "google.golang.org/grpc.ClientConn",
 			Field:      "target",
 		},
-	}, false)
+	}, true)
 
 	if err != nil {
 		return err
@@ -110,6 +112,22 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 		return err
 	}
 	g.eventsReader = rd
+
+	// Write headers probe
+	whOffsets, err := ctx.TargetDetails.GetFunctionReturns(g.FuncNames()[1])
+	if err != nil {
+		return err
+	}
+	for _, whOffset := range whOffsets {
+		whProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeHttp2ClientCreateHeaderFields, &link.UprobeOptions{
+			Offset: whOffset,
+		})
+		if err != nil {
+			return err
+		}
+
+		g.writeHeadersProbe = append(g.writeHeadersProbe, whProbe)
+	}
 
 	return nil
 }
@@ -180,6 +198,10 @@ func (g *grpcInstrumentor) Close() {
 	}
 
 	for _, r := range g.returnProbs {
+		r.Close()
+	}
+
+	for _, r := range g.writeHeadersProbe {
 		r.Close()
 	}
 

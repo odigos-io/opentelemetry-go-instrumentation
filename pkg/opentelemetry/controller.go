@@ -44,6 +44,13 @@ func (c *Controller) Trace(event *events.Event) {
 	log.Logger.V(0).Info("got event", "attrs", event.Attributes, "goroutine", event.GoroutineUID)
 	ctx := c.getContext(event.GoroutineUID)
 	attrs := append(event.Attributes, attribute.Key("goroutine.id").Int64(event.GoroutineUID))
+
+	// TODO: handle remote parent
+	if event.ParentSpanContext != nil {
+		ctx = trace.ContextWithSpanContext(ctx, *event.ParentSpanContext)
+	}
+
+	ctx = ContextWithEbpfEvent(ctx, *event)
 	newCtx, span := c.getTracer(event.Library).
 		Start(ctx, event.Name,
 			trace.WithAttributes(attrs...),
@@ -116,6 +123,7 @@ func NewController() (*Controller, error) {
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
+		sdktrace.WithIDGenerator(NewEbpfSourceIDGenerator()),
 	)
 
 	nsec, err := getMonotonicTime()

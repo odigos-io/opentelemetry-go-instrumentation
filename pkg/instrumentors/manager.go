@@ -73,15 +73,15 @@ func (m *instrumentorsManager) FilterUnusedInstrumentors(target *process.TargetD
 	}
 
 	for name, inst := range m.instrumentors {
-		someFuncExists := false
+		allFuncExists := true
 		for _, instF := range inst.FuncNames() {
-			if _, exists := existingFuncMap[instF]; exists {
-				someFuncExists = true
+			if _, exists := existingFuncMap[instF]; !exists {
+				allFuncExists = false
 				break
 			}
 		}
 
-		if !someFuncExists {
+		if !allFuncExists {
 			log.Logger.V(1).Info("filtering unused instrumentation", "name", name)
 			delete(m.instrumentors, name)
 		}

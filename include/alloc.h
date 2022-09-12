@@ -15,11 +15,8 @@ struct {
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } alloc_map SEC(".maps");
 
-u64 get_area_start() {
+static __always_inline u64 get_area_start() {
     s64 partition_size = (end_addr - start_addr) / total_cpus;
-    if (partition_size > 3 * 1024) {
-        partition_size = 3 * 1024;
-    }
     u32 current_cpu = bpf_get_smp_processor_id();
     s32 start_index = 0;
     u64* start = (u64*) bpf_map_lookup_elem(&alloc_map, &start_index);
@@ -32,13 +29,8 @@ u64 get_area_start() {
     }
 }
 
-u64 get_area_end(u64 start) {
+static __always_inline u64 get_area_end(u64 start) {
     s64 partition_size = (end_addr - start_addr) / total_cpus;
-    if (partition_size > 3 * 1024) {
-        partition_size = 3 * 1024;
-    } else if (partition_size < 0) {
-        partition_size = 0;
-    }
     s32 end_index = 1;
     u64* end = (u64*)bpf_map_lookup_elem(&alloc_map, &end_index);
     if (end == NULL || *end == 0) {
@@ -53,6 +45,14 @@ u64 get_area_end(u64 start) {
 static __always_inline void* write_target_data(void* data, s32 size) {
     u64 start = get_area_start();
     u64 end = get_area_end(start);
+    if (end - start < size) {
+        bpf_printk("reached end of CPU memory block, going to the start again");
+        s32 start_index = 0;
+        long res = bpf_map_delete_elem(&alloc_map, &start_index);
+        bpf_printk("delete result: %d", res);
+        start = get_area_start();
+    }
+
     void* target = (void*)start;
     long success = bpf_probe_write_user(target, data, size);
     if (success == 0) {
@@ -61,6 +61,7 @@ static __always_inline void* write_target_data(void* data, s32 size) {
         bpf_map_update_elem(&alloc_map, &start_index, &updated_start, BPF_ANY);
         return target;
     } else {
+        bpf_printk("failed to write to userspace, error code: %d, addr: %lx, size: %d", success, target, size);
         return NULL;
     }
 }

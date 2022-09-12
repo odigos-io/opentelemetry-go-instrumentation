@@ -1,11 +1,16 @@
 #include "arguments.h"
 #include "goroutines.h"
-#include "alloc.h"
+#include "go_types.h"
+#include "utils.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 #define MAX_SIZE 100
 #define MAX_CONCURRENT 50
+#define MAX_HEADERS 20
+#define MAX_HEADER_STRING 50
+#define W3C_KEY_LENGTH 11
+#define W3C_VAL_LENGTH 32
 
 struct grpc_request_t {
     s64 goroutine;
@@ -25,10 +30,16 @@ struct {
 	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } events SEC(".maps");
 
+struct hpack_header_field {
+    struct go_string name;
+    struct go_string value;
+    bool sensitive;
+};
+
 // Injected in init
 volatile const u64 stream_method_ptr_pos;
-
-volatile unsigned long int value = 0x10000000;
+volatile const u64 frame_fields_pos;
+volatile const u64 frame_stream_id_pod;
 
 
 // This instrumentation attaches uprobe to the following function:
@@ -51,14 +62,7 @@ int uprobe_server_handleStream(struct pt_regs *ctx) {
 
     // Record goroutine
     grpcReq.goroutine = get_current_goroutine();
-    // TODO: remove this
-    char text[13] = "eden federman";
-    void* text_addr = write_target_data(text, sizeof(text));
-    long status = bpf_probe_write_user((void *)(stream_ptr+stream_method_ptr_pos), &text_addr, sizeof(text_addr));
-    bpf_printk("method ptr status: %d", status);
-    u64 text_size = sizeof(text);
-    long status2 = bpf_probe_write_user((void *)(stream_ptr+(stream_method_ptr_pos+8)), &text_size, sizeof(text_size));
-    bpf_printk("method len status: %d", status2);
+
     // Write event
     bpf_map_update_elem(&goid_to_grpc_events, &grpcReq.goroutine, &grpcReq, 0);
 
@@ -85,9 +89,6 @@ int uprobe_server_handleStream_ByRegisters(struct pt_regs *ctx) {
     bpf_probe_read(&goid, sizeof(goid), goid_ptr);
     grpcReq.goroutine = goid;
 
-    //char text[13] = "eden federman";
-    //write_target_data((u64)&text[0], (u32)sizeof(text));
-
     // Write event
     bpf_map_update_elem(&goid_to_grpc_events, &goid, &grpcReq, 0);
     return 0;
@@ -102,5 +103,41 @@ int uprobe_server_handleStream_Returns(struct pt_regs *ctx) {
     grpcReq.end_time = bpf_ktime_get_ns();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &grpcReq, sizeof(grpcReq));
     bpf_map_delete_elem(&goid_to_grpc_events, &goid);
+    return 0;
+}
+
+// func (d *decodeState) decodeHeader(frame *http2.MetaHeadersFrame) error
+SEC("uprobe/decodeState_decodeHeader")
+int uprobe_decodeState_decodeHeader(struct pt_regs *ctx) {
+    bpf_printk("decodeHeader called");
+    u64 frame_pos = 2;
+    void* frame_ptr = get_argument(ctx, frame_pos);
+    struct go_slice header_fields = {};
+    bpf_probe_read(&header_fields, sizeof(header_fields), (void *)(frame_ptr+frame_fields_pos));
+    bpf_printk("There are %d headers, sizeof: %d", header_fields.len, sizeof(header_fields));
+    char key[W3C_KEY_LENGTH] = "traceparent";
+    for (s32 i = 0; i < MAX_HEADERS; i++) {
+        if (i >=  header_fields.len) {
+            break;
+        }
+        struct hpack_header_field hf = {};
+        long res = bpf_probe_read(&hf, sizeof(hf), (void*)(header_fields.array+(i * sizeof(hf))));
+         if (hf.name.len == W3C_KEY_LENGTH && hf.value.len == W3C_VAL_LENGTH) {
+            char current_key[W3C_KEY_LENGTH];
+            bpf_probe_read(current_key, sizeof(current_key), hf.name.str);
+            if (bpf_memcmp(key, current_key, sizeof(key))) {
+               char val[W3C_VAL_LENGTH];
+               bpf_probe_read(val, W3C_VAL_LENGTH, hf.value.str);
+
+               // Get stream id
+               void* headers_frame = NULL;
+               bpf_probe_read(&headers_frame, sizeof(headers_frame), frame_ptr);
+               u32 stream_id = 0;
+               bpf_probe_read(&stream_id, sizeof(stream_id), (void*)(headers_frame+frame_stream_id_pod));
+               bpf_printk("stream id: %d traceparent value is: %s", stream_id, val);
+            }
+         }
+    }
+
     return 0;
 }

@@ -43,7 +43,7 @@ func (t *TargetDetails) GetFunctionOffset(name string) (uint64, error) {
 			return f.Offset, nil
 		}
 	}
-
+	
 	return 0, fmt.Errorf("could not find offset for function %s", name)
 }
 
@@ -99,11 +99,6 @@ func (a *processAnalyzer) Analyze(pid int, relevantFuncs map[string]interface{})
 	}
 	result.GoVersion = goVersion
 	result.Libraries = modules
-
-	//addr, err := a.findAllocOffset(allocSec, elfF)
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	start, end := a.findKeyvalMmap(pid)
 	result.AllocationDetails = &AllocationDetails{

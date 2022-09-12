@@ -1,5 +1,7 @@
 #include "arguments.h"
 #include "goroutines.h"
+#include "go_types.h"
+#include "utils.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
@@ -12,6 +14,12 @@ struct grpc_request_t {
     u64 end_time;
     char method[MAX_SIZE];
     char target[MAX_SIZE];
+};
+
+struct hpack_header_field {
+    struct go_string name;
+    struct go_string value;
+    bool sensitive;
 };
 
 struct {
@@ -81,5 +89,36 @@ int uprobe_ClientConn_Invoke_Returns(struct pt_regs *ctx) {
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &grpcReq, sizeof(grpcReq));
     bpf_map_delete_elem(&goid_to_grpc_events, &goid);
 
+    return 0;
+}
+
+// func (t *http2Client) createHeaderFields(ctx context.Context, callHdr *CallHdr) ([]hpack.HeaderField, error)
+SEC("uprobe/Http2Client_createHeaderFields")
+int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
+    // TODO: Register based ABI return values on EAX,EBC ...
+    u64 slice_pointer_pos = 5;
+    s32 slice_len_pos = 6;
+    s32 slice_cap_pos = 7;
+    struct go_slice slice = {};
+    slice.array = get_argument(ctx, slice_pointer_pos);
+    slice.len = (s32) get_argument(ctx, slice_len_pos);
+    slice.cap = (s32) get_argument(ctx, slice_cap_pos);
+    bpf_printk("createHeaderFields called, slice addr: %lx, slice len: %d, slice cap: %d", slice.array, slice.len, slice.cap);
+    char key[11] = "traceparent";
+    struct go_string key_str = write_user_go_string(key, sizeof(key));
+
+    // Generate trace id
+    unsigned char tid[TRACE_ID_SIZE];
+    generate_random_bytes(tid, TRACE_ID_SIZE);
+    char val[TRACE_ID_STRING_SIZE];
+    bytes_to_hex_string(tid, TRACE_ID_SIZE, val);
+    struct go_string val_str = write_user_go_string(val, sizeof(val));
+    struct hpack_header_field hf = {};
+    hf.name = key_str;
+    hf.value = val_str;
+    append_item_to_slice(&slice, &hf, sizeof(hf));
+    slice.len++;
+    long success = bpf_probe_write_user((void*)ctx->rsp+(slice_len_pos*8), &slice.len, sizeof(slice.len));
+    bpf_printk("len success: %d", success);
     return 0;
 }

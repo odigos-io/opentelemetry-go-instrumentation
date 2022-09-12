@@ -33,6 +33,7 @@ type grpcServerInstrumentor struct {
 	bpfObjects   *bpfObjects
 	uprobe       link.Link
 	returnProbs  []link.Link
+	headersProbe link.Link
 	eventsReader *perf.Reader
 }
 
@@ -45,7 +46,8 @@ func (g *grpcServerInstrumentor) LibraryName() string {
 }
 
 func (g *grpcServerInstrumentor) FuncNames() []string {
-	return []string{"google.golang.org/grpc.(*Server).handleStream"}
+	return []string{"google.golang.org/grpc.(*Server).handleStream",
+		"google.golang.org/grpc/internal/transport.(*decodeState).decodeHeader"}
 }
 
 func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
@@ -59,6 +61,16 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 			VarName:    "stream_method_ptr_pos",
 			StructName: "google.golang.org/grpc/internal/transport.Stream",
 			Field:      "method",
+		},
+		{
+			VarName:    "frame_fields_pos",
+			StructName: "golang.org/x/net/http2.MetaHeadersFrame",
+			Field:      "Fields",
+		},
+		{
+			VarName:    "frame_stream_id_pod",
+			StructName: "golang.org/x/net/http2.FrameHeader",
+			Field:      "StreamID",
 		},
 	}, true)
 
@@ -110,6 +122,18 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 		}
 		g.returnProbs = append(g.returnProbs, retProbe)
 	}
+
+	headerOffset, err := ctx.TargetDetails.GetFunctionOffset(g.FuncNames()[1])
+	if err != nil {
+		return err
+	}
+	hProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeDecodeStateDecodeHeader, &link.UprobeOptions{
+		Offset: headerOffset,
+	})
+	if err != nil {
+		return err
+	}
+	g.headersProbe = hProbe
 
 	rd, err := perf.NewReader(g.bpfObjects.Events, os.Getpagesize())
 	if err != nil {
@@ -176,6 +200,10 @@ func (g *grpcServerInstrumentor) Close() {
 
 	for _, r := range g.returnProbs {
 		r.Close()
+	}
+
+	if g.headersProbe != nil {
+		g.headersProbe.Close()
 	}
 
 	if g.bpfObjects != nil {
