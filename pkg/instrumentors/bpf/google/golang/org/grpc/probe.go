@@ -24,11 +24,12 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
 type GrpcEvent struct {
-	GoRoutine int64
-	StartTime uint64
-	EndTime   uint64
-	Method    [100]byte
-	Target    [100]byte
+	GoRoutine   int64
+	StartTime   uint64
+	EndTime     uint64
+	Method      [50]byte
+	Target      [50]byte
+	SpanContext context.EbpfSpanContext
 }
 
 type grpcInstrumentor struct {
@@ -176,6 +177,13 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 		semconv.NetPeerIPKey.String(target),
 		semconv.NetPeerNameKey.String(target))
 
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    e.SpanContext.TraceID,
+		SpanID:     e.SpanContext.SpanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+
+	log.Logger.V(0).Info("got spancontext", "trace_id", e.SpanContext.TraceID.String(), "span_id", e.SpanContext.SpanID.String())
 	return &events.Event{
 		Library:      g.LibraryName(),
 		GoroutineUID: e.GoRoutine,
@@ -184,6 +192,7 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 		StartTime:    int64(e.StartTime),
 		EndTime:      int64(e.EndTime),
 		Attributes:   attrs,
+		SpanContext:  &sc,
 	}
 }
 

@@ -1,11 +1,12 @@
 #include "arguments.h"
 #include "goroutines.h"
 #include "go_types.h"
-#include "utils.h"
+#include "span_context.h"
+#include "go_context.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
-#define MAX_SIZE 100
+#define MAX_SIZE 50
 #define MAX_CONCURRENT 50
 
 struct grpc_request_t {
@@ -14,6 +15,7 @@ struct grpc_request_t {
     u64 end_time;
     char method[MAX_SIZE];
     char target[MAX_SIZE];
+    struct span_context sc;
 };
 
 struct hpack_header_field {
@@ -24,10 +26,10 @@ struct hpack_header_field {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, s64);
+	__type(key, void*);
 	__type(value, struct grpc_request_t);
 	__uint(max_entries, MAX_CONCURRENT);
-} goid_to_grpc_events SEC(".maps");
+} context_to_grpc_events SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -42,7 +44,7 @@ SEC("uprobe/ClientConn_Invoke")
 int uprobe_ClientConn_Invoke(struct pt_regs *ctx) {
     // positions
     u64 clientconn_pos = 1;
-    u64 context_pos = 2;
+    u64 context_pos = 3;
     u64 method_ptr_pos = 4;
     u64 method_len_pos = 5;
 
@@ -66,28 +68,23 @@ int uprobe_ClientConn_Invoke(struct pt_regs *ctx) {
     target_size = target_size < target_len ? target_size : target_len;
     bpf_probe_read(&grpcReq.target, target_size, target_ptr);
 
-    // Record goroutine
-    grpcReq.goroutine = get_current_goroutine();
-
     // Write event
-    bpf_map_update_elem(&goid_to_grpc_events, &grpcReq.goroutine, &grpcReq, 0);
-
+    void *context_ptr = get_argument(ctx, context_pos);
+    bpf_map_update_elem(&context_to_grpc_events, &context_ptr, &grpcReq, 0);
     return 0;
 }
 
 SEC("uprobe/ClientConn_Invoke")
 int uprobe_ClientConn_Invoke_Returns(struct pt_regs *ctx) {
-    u64 current_thread = bpf_get_current_pid_tgid();
-    void* goid_ptr = bpf_map_lookup_elem(&goroutines_map, &current_thread);
-    s64 goid;
-    bpf_probe_read(&goid, sizeof(goid), goid_ptr);
-
-    void* grpcReq_ptr = bpf_map_lookup_elem(&goid_to_grpc_events, &goid);
+    u64 context_pos = 3;
+    void *context_ptr = get_argument(ctx, context_pos);
+    void* grpcReq_ptr = bpf_map_lookup_elem(&context_to_grpc_events, &context_ptr);
     struct grpc_request_t grpcReq = {};
     bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
+
     grpcReq.end_time = bpf_ktime_get_ns();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &grpcReq, sizeof(grpcReq));
-    bpf_map_delete_elem(&goid_to_grpc_events, &goid);
+    bpf_map_delete_elem(&context_to_grpc_events, &context_ptr);
 
     return 0;
 }
@@ -96,6 +93,8 @@ int uprobe_ClientConn_Invoke_Returns(struct pt_regs *ctx) {
 SEC("uprobe/Http2Client_createHeaderFields")
 int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     // TODO: Register based ABI return values on EAX,EBC ...
+    // Read slice
+    s32 context_pointer_pos = 3;
     u64 slice_pointer_pos = 5;
     s32 slice_len_pos = 6;
     s32 slice_cap_pos = 7;
@@ -103,22 +102,31 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     slice.array = get_argument(ctx, slice_pointer_pos);
     slice.len = (s32) get_argument(ctx, slice_len_pos);
     slice.cap = (s32) get_argument(ctx, slice_cap_pos);
-    bpf_printk("createHeaderFields called, slice addr: %lx, slice len: %d, slice cap: %d", slice.array, slice.len, slice.cap);
+    //bpf_printk("createHeaderFields called, slice addr: %lx, slice len: %d, slice cap: %d", slice.array, slice.len, slice.cap);
     char key[11] = "traceparent";
     struct go_string key_str = write_user_go_string(key, sizeof(key));
 
-    // Generate trace id
-    unsigned char tid[TRACE_ID_SIZE];
-    generate_random_bytes(tid, TRACE_ID_SIZE);
-    char val[TRACE_ID_STRING_SIZE];
-    bytes_to_hex_string(tid, TRACE_ID_SIZE, val);
+    // Find context
+    void *context_ptr = get_argument(ctx, context_pointer_pos);
+    void *parent_ctx = find_context_in_map(context_ptr, &context_to_grpc_events);
+    void* grpcReq_ptr = bpf_map_lookup_elem(&context_to_grpc_events, &parent_ctx);
+    struct grpc_request_t grpcReq = {};
+    bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
+
+    // Generate span context
+    grpcReq.sc = generate_span_context();
+    char val[SPAN_CONTEXT_STRING_SIZE];
+    span_context_to_w3c_string(&grpcReq.sc, val);
     struct go_string val_str = write_user_go_string(val, sizeof(val));
+    bpf_printk("generated traceid string: %s", val);
     struct hpack_header_field hf = {};
     hf.name = key_str;
     hf.value = val_str;
     append_item_to_slice(&slice, &hf, sizeof(hf));
     slice.len++;
     long success = bpf_probe_write_user((void*)ctx->rsp+(slice_len_pos*8), &slice.len, sizeof(slice.len));
-    bpf_printk("len success: %d", success);
+    bpf_map_update_elem(&context_to_grpc_events, &parent_ctx, &grpcReq, 0);
+    //bpf_printk("len success: %d, generated context: %lx trace id: %s", success, context_ptr, val);
+
     return 0;
 }

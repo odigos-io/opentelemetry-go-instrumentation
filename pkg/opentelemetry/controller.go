@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -42,8 +41,13 @@ func (c *Controller) getTracer(libName string) trace.Tracer {
 
 func (c *Controller) Trace(event *events.Event) {
 	log.Logger.V(0).Info("got event", "attrs", event.Attributes, "goroutine", event.GoroutineUID)
-	ctx := c.getContext(event.GoroutineUID)
-	attrs := append(event.Attributes, attribute.Key("goroutine.id").Int64(event.GoroutineUID))
+	ctx := context.Background()
+	//attrs := append(event.Attributes, attribute.Key("goroutine.id").Int64(event.GoroutineUID))
+
+	if event.SpanContext == nil {
+		log.Logger.V(0).Info("got event without context - dropping")
+		return
+	}
 
 	// TODO: handle remote parent
 	if event.ParentSpanContext != nil {
@@ -51,13 +55,14 @@ func (c *Controller) Trace(event *events.Event) {
 	}
 
 	ctx = ContextWithEbpfEvent(ctx, *event)
-	newCtx, span := c.getTracer(event.Library).
+	_, span := c.getTracer(event.Library).
 		Start(ctx, event.Name,
-			trace.WithAttributes(attrs...),
+			trace.WithAttributes(event.Attributes...),
 			trace.WithSpanKind(event.Kind),
 			trace.WithTimestamp(c.convertTime(event.StartTime)))
-	c.updateContext(event.GoroutineUID, newCtx)
+	//c.updateContext(event.GoroutineUID, newCtx)
 	span.End(trace.WithTimestamp(c.convertTime(event.EndTime)))
+	log.Logger.V(0).Info("context in controller", "sc", span.SpanContext())
 }
 
 func (c *Controller) convertTime(t int64) time.Time {

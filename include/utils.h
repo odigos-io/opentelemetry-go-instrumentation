@@ -25,12 +25,13 @@ static __always_inline void generate_random_bytes(unsigned char* buff, u32 size)
     }
 }
 
-char hex[16] = "0123456789abcdef";
+char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
 static __always_inline void bytes_to_hex_string(unsigned char* pin, u32 size, char* out) {
+    char *pout = out;
     int out_index = 0;
     for(u32 i = 0; i < size; i++){
-        *out++ = hex[(*pin>>4)&0xF];
-        *out++ = hex[(*pin++)&0xF];
+        *pout++ = hex[(*pin>>4)&0xF];
+        *pout++ = hex[(*pin++)&0xF];
     }
 }
 

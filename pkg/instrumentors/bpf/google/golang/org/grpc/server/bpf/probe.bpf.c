@@ -10,7 +10,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_HEADERS 20
 #define MAX_HEADER_STRING 50
 #define W3C_KEY_LENGTH 11
-#define W3C_VAL_LENGTH 32
+#define W3C_VAL_LENGTH 55
 
 struct grpc_request_t {
     s64 goroutine;

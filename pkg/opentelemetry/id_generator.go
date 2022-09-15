@@ -3,6 +3,7 @@ package opentelemetry
 import (
 	"context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,10 +35,11 @@ func EventFromContext(ctx context.Context) *events.Event {
 
 func (e *eBPFSourceIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trace.SpanID) {
 	event := EventFromContext(ctx)
-	if event == nil {
+	if event == nil || event.SpanContext == nil {
 		return trace.TraceID{}, trace.SpanID{}
 	}
 
+	log.Logger.V(0).Info("get new ids", "spancontext", event.SpanContext)
 	return event.SpanContext.TraceID(), event.SpanContext.SpanID()
 }
 
@@ -47,5 +49,6 @@ func (e *eBPFSourceIDGenerator) NewSpanID(ctx context.Context, traceID trace.Tra
 		return trace.SpanID{}
 	}
 
+	log.Logger.V(0).Info("get new span ids", "spancontext", event.SpanContext)
 	return event.SpanContext.SpanID()
 }
