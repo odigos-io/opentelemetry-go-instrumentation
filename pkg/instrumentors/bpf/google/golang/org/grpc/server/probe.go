@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
 	"os"
 
 	"github.com/cilium/ebpf"
@@ -12,7 +13,6 @@ import (
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
@@ -23,10 +23,11 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
 type GrpcEvent struct {
-	GoRoutine int64
-	StartTime uint64
-	EndTime   uint64
-	Method    [100]byte
+	StartTime         uint64
+	EndTime           uint64
+	Method            [100]byte
+	SpanContext       context.EbpfSpanContext
+	ParentSpanContext context.EbpfSpanContext
 }
 
 type grpcServerInstrumentor struct {
@@ -61,6 +62,16 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 			VarName:    "stream_method_ptr_pos",
 			StructName: "google.golang.org/grpc/internal/transport.Stream",
 			Field:      "method",
+		},
+		{
+			VarName:    "stream_id_pos",
+			StructName: "google.golang.org/grpc/internal/transport.Stream",
+			Field:      "id",
+		},
+		{
+			VarName:    "stream_ctx_pos",
+			StructName: "google.golang.org/grpc/internal/transport.Stream",
+			Field:      "ctx",
 		},
 		{
 			VarName:    "frame_fields_pos",
@@ -174,17 +185,37 @@ func (g *grpcServerInstrumentor) Run(eventsChan chan<- *events.Event) {
 func (g *grpcServerInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 	method := unix.ByteSliceToString(e.Method[:])
 
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    e.SpanContext.TraceID,
+		SpanID:     e.SpanContext.SpanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+
+	var pscPtr *trace.SpanContext
+	if e.ParentSpanContext.TraceID.IsValid() {
+		psc := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    e.ParentSpanContext.TraceID,
+			SpanID:     e.ParentSpanContext.SpanID,
+			TraceFlags: trace.FlagsSampled,
+			Remote:     true,
+		})
+		pscPtr = &psc
+	} else {
+		pscPtr = nil
+	}
+
 	return &events.Event{
-		Library:      g.LibraryName(),
-		GoroutineUID: e.GoRoutine,
-		Name:         method,
-		Kind:         trace.SpanKindServer,
-		StartTime:    int64(e.StartTime),
-		EndTime:      int64(e.EndTime),
+		Library:   g.LibraryName(),
+		Name:      method,
+		Kind:      trace.SpanKindServer,
+		StartTime: int64(e.StartTime),
+		EndTime:   int64(e.EndTime),
 		Attributes: []attribute.KeyValue{
 			semconv.RPCSystemKey.String("grpc"),
 			semconv.RPCServiceKey.String(method),
 		},
+		ParentSpanContext: pscPtr,
+		SpanContext:       &sc,
 	}
 }
 

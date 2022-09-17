@@ -37,3 +37,10 @@ static __always_inline void span_context_to_w3c_string(struct span_context *ctx,
     *out++ = '0';
     *out   = '1';
 }
+
+static __always_inline void w3c_string_to_span_context(char *str, struct span_context *ctx) {
+    u32 trace_id_start_pos = 3;
+    u32 span_id_start_pod = 36;
+    hex_string_to_bytes(str+trace_id_start_pos, TRACE_ID_STRING_SIZE, ctx->TraceID);
+    hex_string_to_bytes(str+span_id_start_pod, SPAN_ID_STRING_SIZE, ctx->SpanID);
+}

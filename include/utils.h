@@ -35,6 +35,18 @@ static __always_inline void bytes_to_hex_string(unsigned char* pin, u32 size, ch
     }
 }
 
-//static __always_inline char* hex_string_to_bytes(char* str, u32 size) {
-//
-//}
+static __always_inline void hex_string_to_bytes(char* str, u32 size, unsigned char* out) {
+    for (int i = 0; i < (size / 2); i++) {
+        char ch0 = str[2 * i];
+        char ch1 = str[2 * i + 1];
+        u8 nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
+        u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
+        out[i] = (nib0 << 4) | nib1;
+    }
+}
+
+static __always_inline void copy_byte_arrays(unsigned char *src, unsigned char *dst, u32 size) {
+    for (int i = 0; i < size; i++) {
+        dst[i] = src[i];
+    }
+}

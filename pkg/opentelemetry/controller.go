@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
+	"github.com/prometheus/procfs"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"os"
 	"time"
@@ -62,7 +62,6 @@ func (c *Controller) Trace(event *events.Event) {
 			trace.WithTimestamp(c.convertTime(event.StartTime)))
 	//c.updateContext(event.GoroutineUID, newCtx)
 	span.End(trace.WithTimestamp(c.convertTime(event.EndTime)))
-	log.Logger.V(0).Info("context in controller", "sc", span.SpanContext())
 }
 
 func (c *Controller) convertTime(t int64) time.Time {
@@ -131,29 +130,31 @@ func NewController() (*Controller, error) {
 		sdktrace.WithIDGenerator(NewEbpfSourceIDGenerator()),
 	)
 
-	nsec, err := getMonotonicTime()
+	boot, err := getBootTime()
 	if err != nil {
 		return nil, err
 	}
-
-	now := time.Now()
-	bootTime := now.UnixNano() - nsec
+	bootNano := boot.UnixNano()
 
 	return &Controller{
 		tracerProvider: tracerProvider,
 		tracersMap:     make(map[string]trace.Tracer),
 		contextsMap:    make(map[int64]context.Context),
-		bootTime:       bootTime,
+		bootTime:       bootNano,
 	}, nil
 }
 
-func getMonotonicTime() (int64, error) {
-	var ts unix.Timespec
-
-	err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
+func getBootTime() (*time.Time, error) {
+	fs, err := procfs.NewDefaultFS()
 	if err != nil {
-		return 0, fmt.Errorf("could not get monotonic time: %s", err)
+		return nil, err
 	}
 
-	return unix.TimespecToNsec(ts), nil
+	stat, err := fs.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	boot := time.Unix(int64(stat.BootTime), 0)
+	return &boot, nil
 }

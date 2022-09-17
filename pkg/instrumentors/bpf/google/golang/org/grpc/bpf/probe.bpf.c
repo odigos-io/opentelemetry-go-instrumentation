@@ -1,5 +1,4 @@
 #include "arguments.h"
-#include "goroutines.h"
 #include "go_types.h"
 #include "span_context.h"
 #include "go_context.h"
@@ -10,7 +9,6 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_CONCURRENT 50
 
 struct grpc_request_t {
-    s64 goroutine;
     u64 start_time;
     u64 end_time;
     char method[MAX_SIZE];
@@ -126,7 +124,6 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     slice.len++;
     long success = bpf_probe_write_user((void*)ctx->rsp+(slice_len_pos*8), &slice.len, sizeof(slice.len));
     bpf_map_update_elem(&context_to_grpc_events, &parent_ctx, &grpcReq, 0);
-    //bpf_printk("len success: %d, generated context: %lx trace id: %s", success, context_ptr, val);
 
     return 0;
 }

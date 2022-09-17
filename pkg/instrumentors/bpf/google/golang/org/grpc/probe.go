@@ -4,16 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/cilium/ebpf"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
 	"os"
 	"strings"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
@@ -24,7 +24,6 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
 type GrpcEvent struct {
-	GoRoutine   int64
 	StartTime   uint64
 	EndTime     uint64
 	Method      [50]byte
@@ -73,7 +72,7 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	g.bpfObjects = &bpfObjects{}
 	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
-			PinPath: bpffs.GoRoutinesMapDir,
+			PinPath: bpffs.BpfFsPath,
 		},
 	})
 	if err != nil {
@@ -185,14 +184,13 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 
 	log.Logger.V(0).Info("got spancontext", "trace_id", e.SpanContext.TraceID.String(), "span_id", e.SpanContext.SpanID.String())
 	return &events.Event{
-		Library:      g.LibraryName(),
-		GoroutineUID: e.GoRoutine,
-		Name:         method,
-		Kind:         trace.SpanKindClient,
-		StartTime:    int64(e.StartTime),
-		EndTime:      int64(e.EndTime),
-		Attributes:   attrs,
-		SpanContext:  &sc,
+		Library:     g.LibraryName(),
+		Name:        method,
+		Kind:        trace.SpanKindClient,
+		StartTime:   int64(e.StartTime),
+		EndTime:     int64(e.EndTime),
+		Attributes:  attrs,
+		SpanContext: &sc,
 	}
 }
 
