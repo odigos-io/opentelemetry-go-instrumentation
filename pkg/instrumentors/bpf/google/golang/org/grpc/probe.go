@@ -24,11 +24,12 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
 type GrpcEvent struct {
-	StartTime   uint64
-	EndTime     uint64
-	Method      [50]byte
-	Target      [50]byte
-	SpanContext context.EbpfSpanContext
+	StartTime         uint64
+	EndTime           uint64
+	Method            [50]byte
+	Target            [50]byte
+	SpanContext       context.EbpfSpanContext
+	ParentSpanContext context.EbpfSpanContext
 }
 
 type grpcInstrumentor struct {
@@ -182,15 +183,29 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 		TraceFlags: trace.FlagsSampled,
 	})
 
+	var pscPtr *trace.SpanContext
+	if e.ParentSpanContext.TraceID.IsValid() {
+		psc := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    e.ParentSpanContext.TraceID,
+			SpanID:     e.ParentSpanContext.SpanID,
+			TraceFlags: trace.FlagsSampled,
+			Remote:     true,
+		})
+		pscPtr = &psc
+	} else {
+		pscPtr = nil
+	}
+
 	log.Logger.V(0).Info("got spancontext", "trace_id", e.SpanContext.TraceID.String(), "span_id", e.SpanContext.SpanID.String())
 	return &events.Event{
-		Library:     g.LibraryName(),
-		Name:        method,
-		Kind:        trace.SpanKindClient,
-		StartTime:   int64(e.StartTime),
-		EndTime:     int64(e.EndTime),
-		Attributes:  attrs,
-		SpanContext: &sc,
+		Library:           g.LibraryName(),
+		Name:              method,
+		Kind:              trace.SpanKindClient,
+		StartTime:         int64(e.StartTime),
+		EndTime:           int64(e.EndTime),
+		Attributes:        attrs,
+		SpanContext:       &sc,
+		ParentSpanContext: pscPtr,
 	}
 }
 

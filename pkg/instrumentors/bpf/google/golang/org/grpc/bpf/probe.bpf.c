@@ -14,6 +14,7 @@ struct grpc_request_t {
     char method[MAX_SIZE];
     char target[MAX_SIZE];
     struct span_context sc;
+    struct span_context psc;
 };
 
 struct hpack_header_field {
@@ -100,19 +101,28 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     slice.array = get_argument(ctx, slice_pointer_pos);
     slice.len = (s32) get_argument(ctx, slice_len_pos);
     slice.cap = (s32) get_argument(ctx, slice_cap_pos);
-    //bpf_printk("createHeaderFields called, slice addr: %lx, slice len: %d, slice cap: %d", slice.array, slice.len, slice.cap);
     char key[11] = "traceparent";
     struct go_string key_str = write_user_go_string(key, sizeof(key));
 
-    // Find context
+    // Get grpc request struct
     void *context_ptr = get_argument(ctx, context_pointer_pos);
     void *parent_ctx = find_context_in_map(context_ptr, &context_to_grpc_events);
     void* grpcReq_ptr = bpf_map_lookup_elem(&context_to_grpc_events, &parent_ctx);
     struct grpc_request_t grpcReq = {};
     bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
 
-    // Generate span context
-    grpcReq.sc = generate_span_context();
+    // Get parent if exists
+    void *parent_span_ctx = find_context_in_map(context_ptr, &spans_in_progress);
+    if (parent_span_ctx != NULL) {
+        void* psc_ptr = bpf_map_lookup_elem(&spans_in_progress, &parent_span_ctx);
+        bpf_probe_read(&grpcReq.psc, sizeof(grpcReq.psc), psc_ptr);
+        copy_byte_arrays(grpcReq.psc.TraceID, grpcReq.sc.TraceID, TRACE_ID_SIZE);
+        generate_random_bytes(grpcReq.sc.SpanID, SPAN_ID_SIZE);
+    } else {
+        grpcReq.sc = generate_span_context();
+    }
+
+    // Write headers
     char val[SPAN_CONTEXT_STRING_SIZE];
     span_context_to_w3c_string(&grpcReq.sc, val);
     struct go_string val_str = write_user_go_string(val, sizeof(val));

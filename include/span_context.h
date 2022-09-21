@@ -1,11 +1,20 @@
 #include "utils.h"
 
 #define SPAN_CONTEXT_STRING_SIZE 55
+#define MAX_CONCURRENT_SPANS 100
 
 struct span_context {
     unsigned char TraceID[TRACE_ID_SIZE];
     unsigned char SpanID[SPAN_ID_SIZE];
 };
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void*);
+	__type(value, struct span_context);
+	__uint(max_entries, MAX_CONCURRENT_SPANS);
+	__uint(pinning, LIBBPF_PIN_BY_NAME);
+} spans_in_progress SEC(".maps");
 
 static __always_inline struct span_context generate_span_context() {
     struct span_context context = {};
