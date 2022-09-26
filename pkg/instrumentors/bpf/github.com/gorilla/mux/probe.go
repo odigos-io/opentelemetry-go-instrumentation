@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpffs"
 	"os"
 
 	"github.com/cilium/ebpf"
@@ -12,7 +13,6 @@ import (
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"

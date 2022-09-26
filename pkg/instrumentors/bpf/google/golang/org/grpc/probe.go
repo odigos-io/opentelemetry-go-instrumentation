@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/cilium/ebpf"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/goroutine/bpffs"
+	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpffs"
 	"os"
 	"strings"
 
