@@ -11,8 +11,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -130,17 +132,16 @@ func NewController() (*Controller, error) {
 		sdktrace.WithIDGenerator(NewEbpfSourceIDGenerator()),
 	)
 
-	boot, err := getBootTime()
+	bt, err := estimateBootTimeOffset()
 	if err != nil {
 		return nil, err
 	}
-	bootNano := boot.UnixNano()
 
 	return &Controller{
 		tracerProvider: tracerProvider,
 		tracersMap:     make(map[string]trace.Tracer),
 		contextsMap:    make(map[int64]context.Context),
-		bootTime:       bootNano,
+		bootTime:       bt,
 	}, nil
 }
 
@@ -157,4 +158,60 @@ func getBootTime() (*time.Time, error) {
 
 	boot := time.Unix(int64(stat.BootTime), 0)
 	return &boot, nil
+}
+
+func getBootTimeSyscall() (int64, error) {
+	var ts unix.Timespec
+	err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
+	now := time.Now().UnixNano()
+	if err != nil {
+		return 0, fmt.Errorf("could not get boot time: %s", err)
+	}
+
+	return now - unix.TimespecToNsec(ts), nil
+}
+
+func estimateBootTimeOffset() (bootTimeOffset int64, err error) {
+	// The datapath is currently using ktime_get_boot_ns for the pcap timestamp,
+	// which corresponds to CLOCK_BOOTTIME. To be able to convert the the
+	// CLOCK_BOOTTIME to CLOCK_REALTIME (i.e. a unix timestamp).
+
+	// There can be an arbitrary amount of time between the execution of
+	// time.Now() and unix.ClockGettime() below, especially under scheduler
+	// pressure during program startup. To reduce the error introduced by these
+	// delays, we pin the current Go routine to its OS thread and measure the
+	// clocks multiple times, taking only the smallest observed difference
+	// between the two values (which implies the smallest possible delay
+	// between the two snapshots).
+	var minDiff int64 = 1<<63 - 1
+	estimationRounds := 25
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	for round := 0; round < estimationRounds; round++ {
+		var bootTimespec unix.Timespec
+
+		// Ideally we would use __vdso_clock_gettime for both clocks here,
+		// to have as little overhead as possible.
+		// time.Now() will actually use VDSO on Go 1.9+, but calling
+		// unix.ClockGettime to obtain CLOCK_BOOTTIME is a regular system call
+		// for now.
+		unixTime := time.Now()
+		err = unix.ClockGettime(unix.CLOCK_BOOTTIME, &bootTimespec)
+		if err != nil {
+			return 0, err
+		}
+
+		offset := unixTime.UnixNano() - bootTimespec.Nano()
+		diff := offset
+		if diff < 0 {
+			diff = -diff
+		}
+
+		if diff < minDiff {
+			minDiff = diff
+			bootTimeOffset = offset
+		}
+	}
+
+	return bootTimeOffset, nil
 }

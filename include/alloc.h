@@ -43,13 +43,16 @@ static __always_inline u64 get_area_end(u64 start) {
 }
 
 static __always_inline void* write_target_data(void* data, s32 size) {
+    if (!data || data == NULL) {
+        return NULL;
+    }
+
     u64 start = get_area_start();
     u64 end = get_area_end(start);
     if (end - start < size) {
         bpf_printk("reached end of CPU memory block, going to the start again");
         s32 start_index = 0;
-        long res = bpf_map_delete_elem(&alloc_map, &start_index);
-        bpf_printk("delete result: %d", res);
+        bpf_map_delete_elem(&alloc_map, &start_index);
         start = get_area_start();
     }
 

@@ -65,7 +65,6 @@ int uprobe_server_handleStream(struct pt_regs *ctx) {
     if (grpcReq_ptr != NULL) {
         bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
         bpf_map_delete_elem(&streamid_to_grpc_events, &stream_id);
-        bpf_printk("found grpc struct for streamid: %d", stream_id);
         copy_byte_arrays(grpcReq.psc.TraceID, grpcReq.sc.TraceID, TRACE_ID_SIZE);
         generate_random_bytes(grpcReq.sc.SpanID, SPAN_ID_SIZE);
     } else {
@@ -73,7 +72,7 @@ int uprobe_server_handleStream(struct pt_regs *ctx) {
     }
 
     // Set attributes
-    grpcReq.start_time = bpf_ktime_get_ns();
+    grpcReq.start_time = bpf_ktime_get_boot_ns();
     void* method_ptr = 0;
     bpf_probe_read(&method_ptr, sizeof(method_ptr), (void *)(stream_ptr+stream_method_ptr_pos));
     u64 method_len = 0;
@@ -104,7 +103,6 @@ int uprobe_server_handleStream_ByRegisters(struct pt_regs *ctx) {
     if (grpcReq_ptr != NULL) {
         bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
         bpf_map_delete_elem(&streamid_to_grpc_events, &stream_id);
-        bpf_printk("found grpc struct for streamid: %d", stream_id);
         copy_byte_arrays(grpcReq.psc.TraceID, grpcReq.sc.TraceID, TRACE_ID_SIZE);
         generate_random_bytes(grpcReq.sc.SpanID, SPAN_ID_SIZE);
     } else {
@@ -112,7 +110,7 @@ int uprobe_server_handleStream_ByRegisters(struct pt_regs *ctx) {
     }
 
     // Set attributes
-    grpcReq.start_time = bpf_ktime_get_ns();
+    grpcReq.start_time = bpf_ktime_get_boot_ns();
     void* method_ptr = 0;
     bpf_probe_read(&method_ptr, sizeof(method_ptr), (void *)(stream_ptr+stream_method_ptr_pos));
     u64 method_len = 0;
@@ -143,7 +141,7 @@ int uprobe_server_handleStream_Returns(struct pt_regs *ctx) {
     struct grpc_request_t grpcReq = {};
     bpf_probe_read(&grpcReq, sizeof(grpcReq), grpcReq_ptr);
 
-    grpcReq.end_time = bpf_ktime_get_ns();
+    grpcReq.end_time = bpf_ktime_get_boot_ns();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &grpcReq, sizeof(grpcReq));
     bpf_map_delete_elem(&context_to_grpc_events, &ctx_instance);
     return 0;
@@ -175,7 +173,6 @@ int uprobe_decodeState_decodeHeader(struct pt_regs *ctx) {
                bpf_probe_read(&headers_frame, sizeof(headers_frame), frame_ptr);
                u32 stream_id = 0;
                bpf_probe_read(&stream_id, sizeof(stream_id), (void*)(headers_frame+frame_stream_id_pod));
-               bpf_printk("stream id: %d traceparent value is: %s", stream_id, val);
                struct grpc_request_t grpcReq = {};
                w3c_string_to_span_context(val, &grpcReq.psc);
                bpf_map_update_elem(&streamid_to_grpc_events, &stream_id, &grpcReq, 0);
