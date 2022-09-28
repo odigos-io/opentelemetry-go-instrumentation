@@ -100,6 +100,7 @@ We can get a pretty good understanding of how the leaderboard feature works by l
 ## Next Steps
 
 The easiest way to apply this automatic instrumentation for any application is by using a control plane such as [Odigos](https://github.com/keyval-dev/odigos).
+
 For more details visit the [Odigos website](https://odigos.io).
 
 ## Cleanup
