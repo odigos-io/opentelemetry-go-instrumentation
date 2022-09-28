@@ -87,7 +87,7 @@ int uprobe_server_handleStream(struct pt_regs *ctx) {
     void *ctx_instance = 0;
     bpf_probe_read(&ctx_instance, sizeof(ctx_instance), (void*)(ctx_iface+8));
     bpf_map_update_elem(&context_to_grpc_events, &ctx_instance, &grpcReq, 0);
-
+    bpf_map_update_elem(&spans_in_progress, &ctx_instance, &grpcReq.sc, 0);
     return 0;
 }
 
@@ -125,6 +125,7 @@ int uprobe_server_handleStream_ByRegisters(struct pt_regs *ctx) {
     void *ctx_instance = 0;
     bpf_probe_read(&ctx_instance, sizeof(ctx_instance), (void*)(ctx_iface+8));
     bpf_map_update_elem(&context_to_grpc_events, &ctx_instance, &grpcReq, 0);
+    bpf_map_update_elem(&spans_in_progress, &ctx_instance, &grpcReq.sc, 0);
     return 0;
 }
 
@@ -144,6 +145,7 @@ int uprobe_server_handleStream_Returns(struct pt_regs *ctx) {
     grpcReq.end_time = bpf_ktime_get_boot_ns();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &grpcReq, sizeof(grpcReq));
     bpf_map_delete_elem(&context_to_grpc_events, &ctx_instance);
+    bpf_map_delete_elem(&spans_in_progress, &ctx_instance);
     return 0;
 }
 
