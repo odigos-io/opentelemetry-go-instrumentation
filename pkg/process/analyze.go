@@ -43,7 +43,7 @@ func (t *TargetDetails) GetFunctionOffset(name string) (uint64, error) {
 			return f.Offset, nil
 		}
 	}
-	
+
 	return 0, fmt.Errorf("could not find offset for function %s", name)
 }
 
@@ -146,20 +146,6 @@ func (a *processAnalyzer) Analyze(pid int, relevantFuncs map[string]interface{})
 
 	return result, nil
 }
-
-//func (a *processAnalyzer) findAllocOffset(allocSec *elf.Section, elfF *elf.File) (uint64, error) {
-//	for _, prog := range elfF.Progs {
-//		if prog.Type != elf.PT_LOAD || (prog.Flags&elf.PF_X) == 0 {
-//			continue
-//		}
-//
-//		// For more info on this calculation: stackoverflow.com/a/40249502
-//		if prog.Vaddr <= allocSec.Offset && allocSec.Offset < (prog.Vaddr+prog.Memsz) {
-//			return allocSec.Offset - prog.Vaddr + prog.Off, nil
-//		}
-//	}
-//	return 0, errors.New("could not find allocation offset")
-//}
 
 func (a *processAnalyzer) findFuncOffset(f *gosym.Func, elfF *elf.File) (uint64, []uint64, error) {
 	off := f.Value
