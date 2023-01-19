@@ -60,7 +60,7 @@ static __always_inline void* write_target_data(void* data, s32 size) {
     long success = bpf_probe_write_user(target, data, size);
     if (success == 0) {
         s32 start_index = 0;
-        u64 updated_start = start + size;
+        u64 updated_start = start + size + (8 - (size % 8));
         bpf_map_update_elem(&alloc_map, &start_index, &updated_start, BPF_ANY);
         return target;
     } else {
