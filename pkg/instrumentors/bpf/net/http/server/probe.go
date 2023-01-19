@@ -23,11 +23,12 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
 type HttpEvent struct {
-	StartTime   uint64
-	EndTime     uint64
-	Method      [100]byte
-	Path        [100]byte
-	SpanContext context.EbpfSpanContext
+	StartTime         uint64
+	EndTime           uint64
+	Method            [100]byte
+	Path              [100]byte
+	SpanContext       context.EbpfSpanContext
+	ParentSpanContext context.EbpfSpanContext
 }
 
 type httpServerInstrumentor struct {
@@ -70,6 +71,11 @@ func (h *httpServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 			VarName:    "path_ptr_pos",
 			StructName: "net/url.URL",
 			Field:      "Path",
+		},
+		{
+			VarName:    "headers_ptr_pos",
+			StructName: "net/http.Request",
+			Field:      "Header",
 		},
 	}, false)
 
@@ -161,6 +167,19 @@ func (h *httpServerInstrumentor) convertEvent(e *HttpEvent) *events.Event {
 		TraceFlags: trace.FlagsSampled,
 	})
 
+	var pscPtr *trace.SpanContext
+	if e.ParentSpanContext.TraceID.IsValid() {
+		psc := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    e.ParentSpanContext.TraceID,
+			SpanID:     e.ParentSpanContext.SpanID,
+			TraceFlags: trace.FlagsSampled,
+			Remote:     true,
+		})
+		pscPtr = &psc
+	} else {
+		pscPtr = nil
+	}
+
 	return &events.Event{
 		Library:     h.LibraryName(),
 		Name:        path,
@@ -172,6 +191,7 @@ func (h *httpServerInstrumentor) convertEvent(e *HttpEvent) *events.Event {
 			semconv.HTTPMethodKey.String(method),
 			semconv.HTTPTargetKey.String(path),
 		},
+		ParentSpanContext: pscPtr,
 	}
 }
 
