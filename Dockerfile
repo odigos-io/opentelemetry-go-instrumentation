@@ -1,10 +1,11 @@
 FROM fedora:35 as builder
+ARG TARGETARCH
 RUN dnf install clang llvm make libbpf-devel -y
-RUN curl -LO https://go.dev/dl/go1.18.linux-amd64.tar.gz && tar -C /usr/local -xzf go*.linux-amd64.tar.gz
+RUN curl -LO https://go.dev/dl/go1.18.linux-$TARGETARCH.tar.gz && tar -C /usr/local -xzf go*.linux-$TARGETARCH.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 WORKDIR /app
 COPY . .
-RUN make build
+RUN TARGET=$TARGETARCH make build
 
 FROM gcr.io/distroless/base-debian11
 COPY --from=builder /app/kv-go-instrumentation /
