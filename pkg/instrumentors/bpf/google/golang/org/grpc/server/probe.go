@@ -48,7 +48,7 @@ func (g *grpcServerInstrumentor) LibraryName() string {
 
 func (g *grpcServerInstrumentor) FuncNames() []string {
 	return []string{"google.golang.org/grpc.(*Server).handleStream",
-		"google.golang.org/grpc/internal/transport.(*decodeState).decodeHeader"}
+		"google.golang.org/grpc/internal/transport.(*http2Server).operateHeaders"}
 }
 
 func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {

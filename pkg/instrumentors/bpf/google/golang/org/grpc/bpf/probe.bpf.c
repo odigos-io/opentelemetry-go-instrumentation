@@ -156,6 +156,5 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     hf.value = val_str;
     append_item_to_slice(&slice, &hf, sizeof(hf), &slice_user_ptr, &headers_buff_map);
     bpf_map_update_elem(&context_to_grpc_events, &parent_ctx, &grpcReq, 0);
-
     return 0;
 }
