@@ -75,6 +75,7 @@
 #define GO_PARAM7(x) ((x)->r9)
 #define GO_PARAM8(x) ((x)->r10)
 #define GO_PARAM9(x) ((x)->r11)
+#define GOROUTINE(x) ((x)->r14)
 
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
@@ -218,6 +219,7 @@ struct pt_regs;
 #define GO_PARAM7(x) (((PT_REGS_ARM64 *)(x))->regs[6])
 #define GO_PARAM8(x) (((PT_REGS_ARM64 *)(x))->regs[7])
 #define GO_PARAM9(x) (((PT_REGS_ARM64 *)(x))->regs[8])
+#define GOROUTINE(x) (((PT_REGS_ARM64 *)(x))->regs[28])
 
 #define PT_REGS_PARM1(x) (((PT_REGS_ARM64 *)(x))->regs[0])
 #define PT_REGS_PARM2(x) (((PT_REGS_ARM64 *)(x))->regs[1])

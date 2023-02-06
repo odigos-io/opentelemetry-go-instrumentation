@@ -121,6 +121,7 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
         slice.array = get_argument(ctx, slice_pointer_pos);
         slice.len = (long) get_argument(ctx, slice_len_pos);
         slice.cap = (long) get_argument(ctx, slice_cap_pos);
+        bpf_printk("slice len: %d, cap: %d", slice.len, slice.cap);
         slice_user_ptr.array = (void *)(PT_REGS_SP(ctx)+(slice_pointer_pos*8));
         slice_user_ptr.len = (void *)(PT_REGS_SP(ctx)+(slice_len_pos*8));
         slice_user_ptr.cap = (void *)(PT_REGS_SP(ctx)+(slice_cap_pos*8));

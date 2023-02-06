@@ -32,6 +32,7 @@ static __always_inline u64 get_area_start() {
 static __always_inline u64 get_area_end(u64 start) {
     s64 partition_size = (end_addr - start_addr) / total_cpus;
     s32 end_index = 1;
+    bpf_printk("total size: %d, partition size: %d, modulo: %d", end_addr - start_addr, partition_size, (end_addr - start_addr) % partition_size);
     u64* end = (u64*)bpf_map_lookup_elem(&alloc_map, &end_index);
     if (end == NULL || *end == 0) {
         u64 current_end_addr = start + partition_size;
@@ -49,6 +50,9 @@ static __always_inline void* write_target_data(void* data, s32 size) {
 
     u64 start = get_area_start();
     u64 end = get_area_end(start);
+    s32 current_cpu = bpf_get_smp_processor_id();
+    bpf_printk("write of: current cpu: %d, start: %lx, end: %lx", current_cpu, start, end);
+
     if (end - start < size) {
         bpf_printk("reached end of CPU memory block, going to the start again");
         s32 start_index = 0;
