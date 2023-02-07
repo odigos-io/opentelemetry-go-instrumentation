@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	mapSize = 12582912
+	mapSize = 4096 * 6 * 1024
 )
 
 type TargetDetails struct {
@@ -65,8 +65,15 @@ func (a *processAnalyzer) remoteMmap(pid int, mapSize uint64) (uint64, error) {
 		return 0, err
 	}
 
-	defer program.Detach()
-	addr, err := program.Mmap(mapSize, 0)
+	defer func() {
+		log.Logger.V(0).Info("Detaching from process", "pid", pid)
+		err := program.Detach()
+		if err != nil {
+			log.Logger.Error(err, "Failed to detach ptrace", "pid", pid)
+		}
+	}()
+	fd := -1
+	addr, err := program.Mmap(mapSize, uint64(fd))
 	if err != nil {
 		log.Logger.Error(err, "Failed to mmap", "pid", pid)
 		return 0, err

@@ -7,6 +7,6 @@ WORKDIR /app
 COPY . .
 RUN TARGET=$TARGETARCH make build
 
-FROM gcr.io/distroless/base-debian11
+FROM registry.fedoraproject.org/fedora-minimal:35
 COPY --from=builder /app/kv-go-instrumentation /
 CMD ["/kv-go-instrumentation"]

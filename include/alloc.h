@@ -51,8 +51,6 @@ static __always_inline void* write_target_data(void* data, s32 size) {
     u64 start = get_area_start();
     u64 end = get_area_end(start);
     s32 current_cpu = bpf_get_smp_processor_id();
-    bpf_printk("write of: current cpu: %d, start: %lx, end: %lx", current_cpu, start, end);
-
     if (end - start < size) {
         bpf_printk("reached end of CPU memory block, going to the start again");
         s32 start_index = 0;
@@ -65,10 +63,16 @@ static __always_inline void* write_target_data(void* data, s32 size) {
     if (success == 0) {
         s32 start_index = 0;
         u64 updated_start = start + size;
+
+        // align updated_start to 8 bytes
+        if (updated_start % 8 != 0) {
+            updated_start += 8 - (updated_start % 8);
+        }
+
         bpf_map_update_elem(&alloc_map, &start_index, &updated_start, BPF_ANY);
         return target;
-    } else {
-        bpf_printk("failed to write to userspace, error code: %d, addr: %lx, size: %d", success, target, size);
-        return NULL;
     }
+
+    bpf_printk("failed to write to userspace, error code: %d, addr: %lx", success, target);
+    return NULL;
 }

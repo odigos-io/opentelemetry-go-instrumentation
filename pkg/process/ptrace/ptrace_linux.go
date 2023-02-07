@@ -10,6 +10,13 @@ import (
 	"syscall"
 )
 
+const waitPidErrorMessage = "waitpid ret value: %d"
+
+// If it's on 64-bit platform, `^uintptr(0)` will get a 64-bit number full of one.
+// After shifting right for 63-bit, only 1 will be left. Than we got 8 here.
+// If it's on 32-bit platform, After shifting nothing will be left. Than we got 4 here.
+const ptrSize = 4 << uintptr(^uintptr(0)>>63)
+
 var threadRetryLimit = 10
 
 // TracedProgram is a program traced by ptrace
@@ -26,6 +33,15 @@ type TracedProgram struct {
 // Pid return the pid of traced program
 func (p *TracedProgram) Pid() int {
 	return p.pid
+}
+
+func waitPid(pid int) error {
+	ret := waitpid(pid)
+	if ret == pid {
+		return nil
+	}
+
+	return errors.Errorf(waitPidErrorMessage, ret)
 }
 
 // Trace ptrace all threads of a process
@@ -95,10 +111,12 @@ func Trace(pid int, logger logr.Logger) (*TracedProgram, error) {
 				}
 			}()
 
-			//err = waitPid(tid)
-			//if err != nil {
-			//	return nil, errors.WithStack(err)
-			//}
+			err = waitPid(tid)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+
+			logger.Info("attach successfully", "tid", tid)
 			tids[tid] = true
 			tidMap[tid] = true
 		}
@@ -118,10 +136,12 @@ func Trace(pid int, logger logr.Logger) (*TracedProgram, error) {
 		pid:        pid,
 		tids:       tids,
 		backupRegs: &syscall.PtraceRegs{},
+		backupCode: make([]byte, syscallInstrSize),
 		logger:     logger,
 	}
 
 	traceSuccess = true
+
 	return program, nil
 }
 

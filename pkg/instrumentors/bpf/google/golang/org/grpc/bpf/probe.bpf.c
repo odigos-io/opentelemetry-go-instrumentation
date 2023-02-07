@@ -128,6 +128,10 @@ int uprobe_Http2Client_CreateHeaderFields(struct pt_regs *ctx) {
     }
     char key[11] = "traceparent";
     struct go_string key_str = write_user_go_string(key, sizeof(key));
+    if (key_str.len == 0) {
+        bpf_printk("write failed, aborting ebpf probe");
+        return 0;
+    }
 
     // Get grpc request struct
     void *context_ptr = 0;
