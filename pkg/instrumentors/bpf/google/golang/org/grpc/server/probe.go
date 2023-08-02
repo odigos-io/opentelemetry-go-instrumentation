@@ -1,36 +1,55 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpffs"
 	"os"
+
+	"go.opentelemetry.io/auto/pkg/instrumentors/bpffs"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"go.opentelemetry.io/otel/attribute"
-	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
-	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sys/unix"
+
+	"go.opentelemetry.io/auto/pkg/inject"
+	"go.opentelemetry.io/auto/pkg/instrumentors/context"
+	"go.opentelemetry.io/auto/pkg/instrumentors/events"
+	"go.opentelemetry.io/auto/pkg/instrumentors/utils"
+	"go.opentelemetry.io/auto/pkg/log"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target $TARGET -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
-type GrpcEvent struct {
+// Event represents an event in the gRPC server during a gRPC request.
+type Event struct {
 	StartTime         uint64
 	EndTime           uint64
 	Method            [100]byte
-	SpanContext       context.EbpfSpanContext
-	ParentSpanContext context.EbpfSpanContext
+	SpanContext       context.EBPFSpanContext
+	ParentSpanContext context.EBPFSpanContext
 }
 
-type grpcServerInstrumentor struct {
+// Instrumentor is the gRPC server instrumentor.
+type Instrumentor struct {
 	bpfObjects   *bpfObjects
 	uprobe       link.Link
 	returnProbs  []link.Link
@@ -38,26 +57,31 @@ type grpcServerInstrumentor struct {
 	eventsReader *perf.Reader
 }
 
-func New() *grpcServerInstrumentor {
-	return &grpcServerInstrumentor{}
+// New returns a new [Instrumentor].
+func New() *Instrumentor {
+	return &Instrumentor{}
 }
 
-func (g *grpcServerInstrumentor) LibraryName() string {
+// LibraryName returns the gRPC server package import path.
+func (g *Instrumentor) LibraryName() string {
 	return "google.golang.org/grpc/server"
 }
 
-func (g *grpcServerInstrumentor) FuncNames() []string {
+// FuncNames returns the function names from "google.golang.org/grpc" that are
+// instrumented.
+func (g *Instrumentor) FuncNames() []string {
 	return []string{"google.golang.org/grpc.(*Server).handleStream",
 		"google.golang.org/grpc/internal/transport.(*http2Server).operateHeaders"}
 }
 
-func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
+// Load loads all instrumentation offsets.
+func (g *Instrumentor) Load(ctx *context.InstrumentorContext) error {
 	targetLib := "google.golang.org/grpc"
 	libVersion, exists := ctx.TargetDetails.Libraries[targetLib]
 	if !exists {
 		libVersion = ""
 	}
-	spec, err := ctx.Injector.Inject(loadBpf, "google.golang.org/grpc", libVersion, []*inject.InjectStructField{
+	spec, err := ctx.Injector.Inject(loadBpf, "google.golang.org/grpc", libVersion, []*inject.StructField{
 		{
 			VarName:    "stream_method_ptr_pos",
 			StructName: "google.golang.org/grpc/internal/transport.Stream",
@@ -90,9 +114,9 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	g.bpfObjects = &bpfObjects{}
-	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
+	err = utils.LoadEBPFObjects(spec, g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
-			PinPath: bpffs.BpfFsPath,
+			PinPath: bpffs.PathForTargetApplication(ctx.TargetDetails),
 		},
 	})
 	if err != nil {
@@ -105,7 +129,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	up, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeServerHandleStream, &link.UprobeOptions{
-		Offset: offset,
+		Address: offset,
 	})
 	if err != nil {
 		return err
@@ -119,7 +143,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 
 	for _, ret := range retOffsets {
 		retProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeServerHandleStreamReturns, &link.UprobeOptions{
-			Offset: ret,
+			Address: ret,
 		})
 		if err != nil {
 			return err
@@ -132,7 +156,7 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 		return err
 	}
 	hProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeDecodeStateDecodeHeader, &link.UprobeOptions{
-		Offset: headerOffset,
+		Address: headerOffset,
 	})
 	if err != nil {
 		return err
@@ -148,9 +172,10 @@ func (g *grpcServerInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	return nil
 }
 
-func (g *grpcServerInstrumentor) Run(eventsChan chan<- *events.Event) {
+// Run runs the events processing loop.
+func (g *Instrumentor) Run(eventsChan chan<- *events.Event) {
 	logger := log.Logger.WithName("grpc-server-instrumentor")
-	var event GrpcEvent
+	var event Event
 	for {
 		record, err := g.eventsReader.Read()
 		if err != nil {
@@ -175,7 +200,7 @@ func (g *grpcServerInstrumentor) Run(eventsChan chan<- *events.Event) {
 	}
 }
 
-func (g *grpcServerInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
+func (g *Instrumentor) convertEvent(e *Event) *events.Event {
 	method := unix.ByteSliceToString(e.Method[:])
 
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
@@ -212,7 +237,8 @@ func (g *grpcServerInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 	}
 }
 
-func (g *grpcServerInstrumentor) Close() {
+// Close stops the Instrumentor.
+func (g *Instrumentor) Close() {
 	log.Logger.V(0).Info("closing gRPC server instrumentor")
 	if g.eventsReader != nil {
 		g.eventsReader.Close()

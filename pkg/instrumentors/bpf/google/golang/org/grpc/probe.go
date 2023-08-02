@@ -1,68 +1,107 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package grpc
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/cilium/ebpf"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpffs"
 	"os"
 	"strings"
 
+	"github.com/cilium/ebpf"
+
+	"go.opentelemetry.io/auto/pkg/instrumentors/bpffs"
+
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"go.opentelemetry.io/otel/attribute"
-	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sys/unix"
+
+	"go.opentelemetry.io/auto/pkg/inject"
+	"go.opentelemetry.io/auto/pkg/instrumentors/context"
+	"go.opentelemetry.io/auto/pkg/instrumentors/events"
+	"go.opentelemetry.io/auto/pkg/instrumentors/utils"
+	"go.opentelemetry.io/auto/pkg/log"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target $TARGET -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./bpf/probe.bpf.c
 
-type GrpcEvent struct {
+// Event represents an event in the gRPC client during a gRPC request.
+type Event struct {
 	StartTime         uint64
 	EndTime           uint64
 	Method            [50]byte
 	Target            [50]byte
-	SpanContext       context.EbpfSpanContext
-	ParentSpanContext context.EbpfSpanContext
+	SpanContext       context.EBPFSpanContext
+	ParentSpanContext context.EBPFSpanContext
 }
 
-type grpcInstrumentor struct {
-	bpfObjects        *bpfObjects
-	uprobe            link.Link
-	returnProbs       []link.Link
-	writeHeadersProbe []link.Link
-	eventsReader      *perf.Reader
+// Instrumentor is the gRPC client instrumentor.
+type Instrumentor struct {
+	bpfObjects   *bpfObjects
+	uprobes      []link.Link
+	eventsReader *perf.Reader
 }
 
-func New() *grpcInstrumentor {
-	return &grpcInstrumentor{}
+// New returns a new [Instrumentor].
+func New() *Instrumentor {
+	return &Instrumentor{}
 }
 
-func (g *grpcInstrumentor) LibraryName() string {
+// LibraryName returns the gRPC package import path.
+func (g *Instrumentor) LibraryName() string {
 	return "google.golang.org/grpc"
 }
 
-func (g *grpcInstrumentor) FuncNames() []string {
+// FuncNames returns the function names from "google.golang.org/grpc" that are
+// instrumented.
+func (g *Instrumentor) FuncNames() []string {
 	return []string{"google.golang.org/grpc.(*ClientConn).Invoke",
-		"google.golang.org/grpc/internal/transport.(*http2Client).createHeaderFields"}
+		"google.golang.org/grpc/internal/transport.(*http2Client).NewStream",
+		"google.golang.org/grpc/internal/transport.(*loopyWriter).headerHandler"}
 }
 
-func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
+// Load loads all instrumentation offsets.
+func (g *Instrumentor) Load(ctx *context.InstrumentorContext) error {
 	libVersion, exists := ctx.TargetDetails.Libraries[g.LibraryName()]
 	if !exists {
 		libVersion = ""
 	}
-	spec, err := ctx.Injector.Inject(loadBpf, g.LibraryName(), libVersion, []*inject.InjectStructField{
+	spec, err := ctx.Injector.Inject(loadBpf, g.LibraryName(), libVersion, []*inject.StructField{
 		{
 			VarName:    "clientconn_target_ptr_pos",
 			StructName: "google.golang.org/grpc.ClientConn",
 			Field:      "target",
+		},
+		{
+			VarName:    "httpclient_nextid_pos",
+			StructName: "google.golang.org/grpc/internal/transport.http2Client",
+			Field:      "nextID",
+		},
+		{
+			VarName:    "headerFrame_hf_pos",
+			StructName: "google.golang.org/grpc/internal/transport.headerFrame",
+			Field:      "hf",
+		},
+		{
+			VarName:    "headerFrame_streamid_pos",
+			StructName: "google.golang.org/grpc/internal/transport.headerFrame",
+			Field:      "streamID",
 		},
 	}, true)
 
@@ -71,11 +110,12 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	g.bpfObjects = &bpfObjects{}
-	err = spec.LoadAndAssign(g.bpfObjects, &ebpf.CollectionOptions{
+	err = utils.LoadEBPFObjects(spec, g.bpfObjects, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
-			PinPath: bpffs.BpfFsPath,
+			PinPath: bpffs.PathForTargetApplication(ctx.TargetDetails),
 		},
 	})
+
 	if err != nil {
 		return err
 	}
@@ -86,13 +126,14 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 	}
 
 	up, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeClientConnInvoke, &link.UprobeOptions{
-		Offset: offset,
+		Address: offset,
 	})
 	if err != nil {
 		return err
 	}
 
-	g.uprobe = up
+	g.uprobes = append(g.uprobes, up)
+
 	retOffsets, err := ctx.TargetDetails.GetFunctionReturns(g.FuncNames()[0])
 	if err != nil {
 		return err
@@ -100,42 +141,54 @@ func (g *grpcInstrumentor) Load(ctx *context.InstrumentorContext) error {
 
 	for _, ret := range retOffsets {
 		retProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeClientConnInvokeReturns, &link.UprobeOptions{
-			Offset: ret,
+			Address: ret,
 		})
 		if err != nil {
 			return err
 		}
-		g.returnProbs = append(g.returnProbs, retProbe)
+		g.uprobes = append(g.uprobes, retProbe)
 	}
+
+	// SendMsg probe
+	sendMsgOffset, err := ctx.TargetDetails.GetFunctionOffset(g.FuncNames()[1])
+	if err != nil {
+		return err
+	}
+	sendMsgProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeHttp2ClientNewStream, &link.UprobeOptions{
+		Address: sendMsgOffset,
+	})
+	if err != nil {
+		return err
+	}
+	g.uprobes = append(g.uprobes, sendMsgProbe)
+
+	// Write headers probe
+	whOffset, err := ctx.TargetDetails.GetFunctionOffset(g.FuncNames()[2])
+	if err != nil {
+		return err
+	}
+
+	whProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeLoopyWriterHeaderHandler, &link.UprobeOptions{
+		Address: whOffset,
+	})
+	if err != nil {
+		return err
+	}
+
+	g.uprobes = append(g.uprobes, whProbe)
 
 	rd, err := perf.NewReader(g.bpfObjects.Events, os.Getpagesize())
 	if err != nil {
 		return err
 	}
 	g.eventsReader = rd
-
-	// Write headers probe
-	whOffsets, err := ctx.TargetDetails.GetFunctionReturns(g.FuncNames()[1])
-	if err != nil {
-		return err
-	}
-	for _, whOffset := range whOffsets {
-		whProbe, err := ctx.Executable.Uprobe("", g.bpfObjects.UprobeHttp2ClientCreateHeaderFields, &link.UprobeOptions{
-			Offset: whOffset,
-		})
-		if err != nil {
-			return err
-		}
-
-		g.writeHeadersProbe = append(g.writeHeadersProbe, whProbe)
-	}
-
 	return nil
 }
 
-func (g *grpcInstrumentor) Run(eventsChan chan<- *events.Event) {
+// Run runs the events processing loop.
+func (g *Instrumentor) Run(eventsChan chan<- *events.Event) {
 	logger := log.Logger.WithName("grpc-instrumentor")
-	var event GrpcEvent
+	var event Event
 	for {
 		record, err := g.eventsReader.Read()
 		if err != nil {
@@ -161,7 +214,7 @@ func (g *grpcInstrumentor) Run(eventsChan chan<- *events.Event) {
 }
 
 // According to https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/rpc.md
-func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
+func (g *Instrumentor) convertEvent(e *Event) *events.Event {
 	method := unix.ByteSliceToString(e.Method[:])
 	target := unix.ByteSliceToString(e.Target[:])
 	var attrs []attribute.KeyValue
@@ -174,7 +227,6 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 
 	attrs = append(attrs, semconv.RPCSystemKey.String("grpc"),
 		semconv.RPCServiceKey.String(method),
-		semconv.NetPeerIPKey.String(target),
 		semconv.NetPeerNameKey.String(target))
 
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
@@ -209,21 +261,14 @@ func (g *grpcInstrumentor) convertEvent(e *GrpcEvent) *events.Event {
 	}
 }
 
-func (g *grpcInstrumentor) Close() {
+// Close stops the Instrumentor.
+func (g *Instrumentor) Close() {
 	log.Logger.V(0).Info("closing gRPC instrumentor")
 	if g.eventsReader != nil {
 		g.eventsReader.Close()
 	}
 
-	if g.uprobe != nil {
-		g.uprobe.Close()
-	}
-
-	for _, r := range g.returnProbs {
-		r.Close()
-	}
-
-	for _, r := range g.writeHeadersProbe {
+	for _, r := range g.uprobes {
 		r.Close()
 	}
 

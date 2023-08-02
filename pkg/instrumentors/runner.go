@@ -1,18 +1,35 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package instrumentors
 
 import (
 	"fmt"
+
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/inject"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/context"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/process"
+
+	"go.opentelemetry.io/auto/pkg/inject"
+	"go.opentelemetry.io/auto/pkg/instrumentors/context"
+	"go.opentelemetry.io/auto/pkg/log"
+	"go.opentelemetry.io/auto/pkg/process"
 )
 
-func (m *instrumentorsManager) Run(target *process.TargetDetails) error {
+// Run runs the event processing loop for all managed Instrumentors.
+func (m *Manager) Run(target *process.TargetDetails) error {
 	if len(m.instrumentors) == 0 {
-		log.Logger.V(0).Info("there are no avilable instrumentations for target process")
+		log.Logger.V(0).Info("there are no available instrumentations for target process")
 		return nil
 	}
 
@@ -30,14 +47,14 @@ func (m *instrumentorsManager) Run(target *process.TargetDetails) error {
 		case <-m.done:
 			log.Logger.V(0).Info("shutting down all instrumentors due to signal")
 			m.cleanup()
-			return nil
+			return m.allocator.Cleanup(target)
 		case e := <-m.incomingEvents:
 			m.otelController.Trace(e)
 		}
 	}
 }
 
-func (m *instrumentorsManager) load(target *process.TargetDetails) error {
+func (m *Manager) load(target *process.TargetDetails) error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -78,13 +95,14 @@ func (m *instrumentorsManager) load(target *process.TargetDetails) error {
 	return nil
 }
 
-func (m *instrumentorsManager) cleanup() {
+func (m *Manager) cleanup() {
 	close(m.incomingEvents)
 	for _, i := range m.instrumentors {
 		i.Close()
 	}
 }
 
-func (m *instrumentorsManager) Close() {
+// Close closes m.
+func (m *Manager) Close() {
 	m.done <- true
 }

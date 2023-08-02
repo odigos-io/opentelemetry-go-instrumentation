@@ -1,25 +1,46 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ptrace
 
 import (
 	"fmt"
-	"github.com/go-logr/logr"
-	"github.com/pkg/errors"
 	"os"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"go.opentelemetry.io/auto/pkg/log"
+
+	"github.com/hashicorp/go-version"
+
+	"go.opentelemetry.io/auto/pkg/instrumentors/utils"
+
+	"github.com/go-logr/logr"
+	"github.com/pkg/errors"
 )
 
 const waitPidErrorMessage = "waitpid ret value: %d"
 
-// If it's on 64-bit platform, `^uintptr(0)` will get a 64-bit number full of one.
-// After shifting right for 63-bit, only 1 will be left. Than we got 8 here.
-// If it's on 32-bit platform, After shifting nothing will be left. Than we got 4 here.
-const ptrSize = 4 << uintptr(^uintptr(0)>>63)
+const (
+	MADV_POPULATE_READ  = 0x16
+	MADV_POPULATE_WRITE = 0x17
+)
 
 var threadRetryLimit = 10
 
-// TracedProgram is a program traced by ptrace
+// TracedProgram is a program traced by ptrace.
 type TracedProgram struct {
 	pid  int
 	tids []int
@@ -30,7 +51,7 @@ type TracedProgram struct {
 	logger logr.Logger
 }
 
-// Pid return the pid of traced program
+// Pid return the pid of traced program.
 func (p *TracedProgram) Pid() int {
 	return p.pid
 }
@@ -44,10 +65,8 @@ func waitPid(pid int) error {
 	return errors.Errorf(waitPidErrorMessage, ret)
 }
 
-// Trace ptrace all threads of a process
-func Trace(pid int, logger logr.Logger) (*TracedProgram, error) {
-	traceSuccess := false
-
+// NewTracedProgram ptrace all threads of a process.
+func NewTracedProgram(pid int, logger logr.Logger) (*TracedProgram, error) {
 	tidMap := make(map[int]bool)
 	retryCount := make(map[int]int)
 
@@ -100,19 +119,13 @@ func Trace(pid int, logger logr.Logger) (*TracedProgram, error) {
 				}
 				continue
 			}
-			defer func() {
-				if !traceSuccess {
-					err = syscall.PtraceDetach(tid)
-					if err != nil {
-						if !strings.Contains(err.Error(), "no such process") {
-							logger.Error(err, "detach failed", "tid", tid)
-						}
-					}
-				}
-			}()
 
 			err = waitPid(tid)
 			if err != nil {
+				e := syscall.PtraceDetach(tid)
+				if e != nil && !strings.Contains(e.Error(), "no such process") {
+					logger.Error(e, "detach failed", "tid", tid)
+				}
 				return nil, errors.WithStack(err)
 			}
 
@@ -140,12 +153,10 @@ func Trace(pid int, logger logr.Logger) (*TracedProgram, error) {
 		logger:     logger,
 	}
 
-	traceSuccess = true
-
 	return program, nil
 }
 
-// Detach detaches from all threads of the processes
+// Detach detaches from all threads of the processes.
 func (p *TracedProgram) Detach() error {
 	for _, tid := range p.tids {
 		err := syscall.PtraceDetach(tid)
@@ -160,14 +171,14 @@ func (p *TracedProgram) Detach() error {
 	return nil
 }
 
-// Protect will backup regs and rip into fields
+// Protect will backup regs and rip into fields.
 func (p *TracedProgram) Protect() error {
 	err := getRegs(p.pid, p.backupRegs)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	_, err = syscall.PtracePeekData(p.pid, getIp(p.backupRegs), p.backupCode)
+	_, err = syscall.PtracePeekData(p.pid, getIP(p.backupRegs), p.backupCode)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -175,14 +186,14 @@ func (p *TracedProgram) Protect() error {
 	return nil
 }
 
-// Restore will restore regs and rip from fields
+// Restore will restore regs and rip from fields.
 func (p *TracedProgram) Restore() error {
 	err := setRegs(p.pid, p.backupRegs)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	_, err = syscall.PtracePokeData(p.pid, getIp(p.backupRegs), p.backupCode)
+	_, err = syscall.PtracePokeData(p.pid, getIP(p.backupRegs), p.backupCode)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -190,13 +201,13 @@ func (p *TracedProgram) Restore() error {
 	return nil
 }
 
-// Wait waits until the process stops
+// Wait waits until the process stops.
 func (p *TracedProgram) Wait() error {
 	_, err := syscall.Wait4(p.pid, nil, 0, nil)
 	return err
 }
 
-// Step moves one step forward
+// Step moves one step forward.
 func (p *TracedProgram) Step() error {
 	err := syscall.PtraceSingleStep(p.pid)
 	if err != nil {
@@ -206,7 +217,25 @@ func (p *TracedProgram) Step() error {
 	return p.Wait()
 }
 
-// Mmap runs mmap syscall
+// Mmap runs mmap syscall.
 func (p *TracedProgram) Mmap(length uint64, fd uint64) (uint64, error) {
-	return p.Syscall(syscall.SYS_MMAP, 0, length, syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC, syscall.MAP_ANON|syscall.MAP_PRIVATE|syscall.MAP_POPULATE, fd, 0)
+	return p.Syscall(syscall.SYS_MMAP, 0, length, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE|syscall.MAP_POPULATE|syscall.MAP_LOCKED, fd, 0)
+}
+
+// Madvise runs madvise syscall.
+func (p *TracedProgram) Madvise(addr uint64, length uint64) error {
+	advice := uint64(syscall.MADV_WILLNEED)
+	ver, err := utils.GetLinuxKernelVersion()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	minVersion := version.Must(version.NewVersion("5.14"))
+	log.Logger.V(0).Info("Detected linux kernel version", "version", ver)
+	if ver.GreaterThanOrEqual(minVersion) {
+		advice = syscall.MADV_WILLNEED | MADV_POPULATE_WRITE | MADV_POPULATE_READ
+	}
+
+	_, err = p.Syscall(syscall.SYS_MADVISE, addr, length, advice, 0, 0, 0)
+	return err
 }
