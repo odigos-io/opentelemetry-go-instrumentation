@@ -1,4 +1,16 @@
-// This is a compact version of `vmlinux.h`
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #define MAX_OS_THREADS 20
 
@@ -25,7 +37,8 @@ typedef __u32 __be32;
 typedef __u64 __be64;
 typedef __u32 __wsum;
 
-enum bpf_map_type {
+enum bpf_map_type
+{
 	BPF_MAP_TYPE_UNSPEC = 0,
 	BPF_MAP_TYPE_HASH = 1,
 	BPF_MAP_TYPE_ARRAY = 2,
@@ -57,7 +70,8 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_INODE_STORAGE = 28,
 };
 
-enum {
+enum
+{
 	BPF_ANY = 0,
 	BPF_NOEXIST = 1,
 	BPF_EXIST = 2,
@@ -72,12 +86,17 @@ enum {
 
 #if defined(__TARGET_ARCH_x86)
 struct pt_regs {
+	/*
+	 * C ABI says these regs are callee-preserved. They aren't saved on kernel entry
+	 * unless syscall needs a complete, fully filled "struct pt_regs".
+	 */
 	long unsigned int r15;
 	long unsigned int r14;
 	long unsigned int r13;
 	long unsigned int r12;
 	long unsigned int bp;
 	long unsigned int bx;
+	/* These regs are callee-clobbered. Always saved on kernel entry. */
 	long unsigned int r11;
 	long unsigned int r10;
 	long unsigned int r9;
@@ -87,12 +106,18 @@ struct pt_regs {
 	long unsigned int dx;
 	long unsigned int si;
 	long unsigned int di;
+	/*
+	 * On syscall entry, this is syscall#. On CPU exception, this is error code.
+	 * On hw interrupt, it's IRQ number:
+	 */
 	long unsigned int orig_ax;
+	/* Return frame for iretq */
 	long unsigned int ip;
 	long unsigned int cs;
 	long unsigned int flags;
 	long unsigned int sp;
 	long unsigned int ss;
+	/* top of stack page */
 };
 #elif defined(__TARGET_ARCH_arm64)
 struct user_pt_regs {

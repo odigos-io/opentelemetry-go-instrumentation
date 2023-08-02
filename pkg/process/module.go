@@ -1,3 +1,17 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package process
 
 import (
@@ -6,9 +20,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/hashicorp/go-version"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
 	"strings"
+
+	"github.com/hashicorp/go-version"
+
+	"go.opentelemetry.io/auto/pkg/log"
 )
 
 // The build info blob left by the linker is identified by
@@ -18,7 +34,7 @@ import (
 var buildInfoMagic = []byte("\xff Go buildinf:")
 var errNotGoExe = errors.New("not a Go executable")
 
-func (a *processAnalyzer) getModuleDetails(f *elf.File) (*version.Version, map[string]string, error) {
+func (a *Analyzer) getModuleDetails(f *elf.File) (*version.Version, map[string]string, error) {
 	goVersion, modules, err := getGoDetails(f)
 	if err != nil {
 		return nil, nil, err
@@ -76,7 +92,7 @@ func getGoDetails(f *elf.File) (string, string, error) {
 	var vers, mod string
 	if data[15]&2 != 0 {
 		vers, data = decodeString(data[32:])
-		mod, data = decodeString(data)
+		mod, _ = decodeString(data)
 	} else {
 		bigEndian := data[15] != 0
 		var bo binary.ByteOrder

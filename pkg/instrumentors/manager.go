@@ -1,35 +1,53 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package instrumentors
 
 import (
 	"fmt"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/allocator"
-	gorillaMux "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/github.com/gorilla/mux"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc"
-	grpcServer "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc/server"
-	httpServer "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/net/http/server"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/opentelemetry"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/process"
+
+	"go.opentelemetry.io/auto/pkg/instrumentors/allocator"
+	"go.opentelemetry.io/auto/pkg/instrumentors/bpf/github.com/gin-gonic/gin"
+	gorillaMux "go.opentelemetry.io/auto/pkg/instrumentors/bpf/github.com/gorilla/mux"
+	"go.opentelemetry.io/auto/pkg/instrumentors/bpf/google/golang/org/grpc"
+	grpcServer "go.opentelemetry.io/auto/pkg/instrumentors/bpf/google/golang/org/grpc/server"
+	httpClient "go.opentelemetry.io/auto/pkg/instrumentors/bpf/net/http/client"
+	httpServer "go.opentelemetry.io/auto/pkg/instrumentors/bpf/net/http/server"
+	"go.opentelemetry.io/auto/pkg/instrumentors/events"
+	"go.opentelemetry.io/auto/pkg/log"
+	"go.opentelemetry.io/auto/pkg/opentelemetry"
+	"go.opentelemetry.io/auto/pkg/process"
 )
 
-var (
-	ErrNotAllFuncsFound = fmt.Errorf("not all functions found for instrumentation")
-)
+// Error message returned when unable to find all instrumentation functions.
+var errNotAllFuncsFound = fmt.Errorf("not all functions found for instrumentation")
 
-type instrumentorsManager struct {
+// Manager handles the management of [Instrumentor] instances.
+type Manager struct {
 	instrumentors  map[string]Instrumentor
 	done           chan bool
 	incomingEvents chan *events.Event
-	otelController *opentelemetry.Controller
 	allocator      *allocator.Allocator
+	otelController *opentelemetry.Controller
 }
 
-func NewManager(otelController *opentelemetry.Controller) (*instrumentorsManager, error) {
-	m := &instrumentorsManager{
+// NewManager returns a new [Manager].
+func NewManager(otelController *opentelemetry.Controller) (*Manager, error) {
+	m := &Manager{
 		instrumentors:  make(map[string]Instrumentor),
 		done:           make(chan bool, 1),
-		incomingEvents: make(chan *events.Event),
+		incomingEvents: make(chan *events.Event, 10),
 		otelController: otelController,
 		allocator:      allocator.New(),
 	}
@@ -42,7 +60,7 @@ func NewManager(otelController *opentelemetry.Controller) (*instrumentorsManager
 	return m, nil
 }
 
-func (m *instrumentorsManager) registerInstrumentor(instrumentor Instrumentor) error {
+func (m *Manager) registerInstrumentor(instrumentor Instrumentor) error {
 	if _, exists := m.instrumentors[instrumentor.LibraryName()]; exists {
 		return fmt.Errorf("library %s registered twice, aborting", instrumentor.LibraryName())
 	}
@@ -51,7 +69,9 @@ func (m *instrumentorsManager) registerInstrumentor(instrumentor Instrumentor) e
 	return nil
 }
 
-func (m *instrumentorsManager) GetRelevantFuncs() map[string]interface{} {
+// GetRelevantFuncs returns the instrumented functions for all managed
+// Instrumentors.
+func (m *Manager) GetRelevantFuncs() map[string]interface{} {
 	funcsMap := make(map[string]interface{})
 	for _, i := range m.instrumentors {
 		for _, f := range i.FuncNames() {
@@ -62,7 +82,9 @@ func (m *instrumentorsManager) GetRelevantFuncs() map[string]interface{} {
 	return funcsMap
 }
 
-func (m *instrumentorsManager) FilterUnusedInstrumentors(target *process.TargetDetails) {
+// filterUnusedInstrumentors filterers Instrumentors whose functions are
+// already instrumented out of the Manager.
+func (m *Manager) filterUnusedInstrumentors(target *process.TargetDetails) {
 	existingFuncMap := make(map[string]interface{})
 	for _, f := range target.Functions {
 		existingFuncMap[f.Name] = nil
@@ -78,19 +100,30 @@ func (m *instrumentorsManager) FilterUnusedInstrumentors(target *process.TargetD
 
 		if funcsFound != len(inst.FuncNames()) {
 			if funcsFound > 0 {
-				log.Logger.Error(ErrNotAllFuncsFound, "some of expected functions not found - check instrumented functions", "instrumentation_name", name, "funcs_found", funcsFound, "funcs_expected", len(inst.FuncNames()))
+				log.Logger.Error(
+					errNotAllFuncsFound,
+					"some of expected functions not found - check instrumented functions",
+					"instrumentation_name",
+					name,
+					"funcs_found",
+					funcsFound,
+					"funcs_expected",
+					len(inst.FuncNames()),
+				)
 			}
 			delete(m.instrumentors, name)
 		}
 	}
 }
 
-func registerInstrumentors(m *instrumentorsManager) error {
+func registerInstrumentors(m *Manager) error {
 	insts := []Instrumentor{
 		grpc.New(),
 		grpcServer.New(),
 		httpServer.New(),
+		httpClient.New(),
 		gorillaMux.New(),
+		gin.New(),
 	}
 
 	for _, i := range insts {

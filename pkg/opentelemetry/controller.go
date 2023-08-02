@@ -1,34 +1,47 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package opentelemetry
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"runtime"
 	"time"
 
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
-	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
-	"github.com/prometheus/procfs"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"golang.org/x/sys/unix"
+
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sys/unix"
-	"google.golang.org/grpc"
+
+	"go.opentelemetry.io/auto"
+	"go.opentelemetry.io/auto/pkg/instrumentors/events"
+	"go.opentelemetry.io/auto/pkg/log"
 )
 
-const (
-	otelEndpointEnvVar    = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	otelServiceNameEnvVar = "OTEL_SERVICE_NAME"
-)
-
+// Controller handles OpenTelemetry telemetry generation for events.
 type Controller struct {
 	tracerProvider trace.TracerProvider
 	tracersMap     map[string]trace.Tracer
 	bootTime       int64
+}
+
+// ControllerSetting is a wrapper for params required to initialize Controller.
+type ControllerSetting struct {
+	ServiceName string
+	Exporter    sdktrace.SpanExporter
 }
 
 func (c *Controller) getTracer(libName string) trace.Tracer {
@@ -42,13 +55,13 @@ func (c *Controller) getTracer(libName string) trace.Tracer {
 	return newTracer
 }
 
+// Trace creates a trace span for event.
 func (c *Controller) Trace(event *events.Event) {
 	log.Logger.V(0).Info("got event", "attrs", event.Attributes)
 	ctx := context.Background()
 
 	if event.SpanContext == nil {
 		log.Logger.V(0).Info("got event without context - dropping")
-		return
 	}
 
 	// TODO: handle remote parent
@@ -56,7 +69,7 @@ func (c *Controller) Trace(event *events.Event) {
 		ctx = trace.ContextWithSpanContext(ctx, *event.ParentSpanContext)
 	}
 
-	ctx = ContextWithEbpfEvent(ctx, *event)
+	ctx = ContextWithEBPFEvent(ctx, *event)
 	_, span := c.getTracer(event.Library).
 		Start(ctx, event.Name,
 			trace.WithAttributes(event.Attributes...),
@@ -69,77 +82,28 @@ func (c *Controller) convertTime(t int64) time.Time {
 	return time.Unix(0, c.bootTime+t)
 }
 
-func NewStdoutController() (*Controller, error) {
-	traceExporter, err := stdouttrace.New()
-
-	if err != nil {
-		return nil, err
-	}
-
-	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
-	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithSpanProcessor(bsp),
-		sdktrace.WithIDGenerator(NewEbpfSourceIDGenerator()),
-	)
-
-	bt, err := estimateBootTimeOffset()
-	if err != nil {
-		return nil, err
-	}
-
-	return &Controller{
-		tracerProvider: tracerProvider,
-		tracersMap:     make(map[string]trace.Tracer),
-		bootTime:       bt,
-	}, nil
-}
-
-func NewController() (*Controller, error) {
-	endpoint, exists := os.LookupEnv(otelEndpointEnvVar)
-	if !exists {
-		return nil, fmt.Errorf("%s env var must be set", otelEndpointEnvVar)
-	}
-
-	serviceName, exists := os.LookupEnv(otelServiceNameEnvVar)
-	if !exists {
-		return nil, fmt.Errorf("%s env var must be set", otelServiceNameEnvVar)
-	}
-
-	ctx := context.Background()
+// NewController returns a new initialized [Controller].
+func NewController(
+	ctx context.Context,
+	settings ControllerSetting,
+) (*Controller, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceNameKey.String(settings.ServiceName),
 			semconv.TelemetrySDKLanguageGo,
+			semconv.TelemetryAutoVersionKey.String(auto.Version()),
 		),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Logger.V(0).Info("Establishing connection to OpenTelemetry collector ...")
-	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-	conn, err := grpc.DialContext(timeoutContext, endpoint, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Logger.Error(err, "unable to connect to OpenTelemetry collector", "addr", endpoint)
-		return nil, err
-	}
-
-	traceExporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithGRPCConn(conn),
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+	bsp := sdktrace.NewBatchSpanProcessor(settings.Exporter)
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
-		sdktrace.WithIDGenerator(NewEbpfSourceIDGenerator()),
+		sdktrace.WithIDGenerator(newEBPFSourceIDGenerator()),
 	)
 
 	bt, err := estimateBootTimeOffset()
@@ -152,32 +116,6 @@ func NewController() (*Controller, error) {
 		tracersMap:     make(map[string]trace.Tracer),
 		bootTime:       bt,
 	}, nil
-}
-
-func getBootTime() (*time.Time, error) {
-	fs, err := procfs.NewDefaultFS()
-	if err != nil {
-		return nil, err
-	}
-
-	stat, err := fs.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	boot := time.Unix(int64(stat.BootTime), 0)
-	return &boot, nil
-}
-
-func getBootTimeSyscall() (int64, error) {
-	var ts unix.Timespec
-	err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
-	now := time.Now().UnixNano()
-	if err != nil {
-		return 0, fmt.Errorf("could not get boot time: %s", err)
-	}
-
-	return now - unix.TimespecToNsec(ts), nil
 }
 
 func estimateBootTimeOffset() (bootTimeOffset int64, err error) {
