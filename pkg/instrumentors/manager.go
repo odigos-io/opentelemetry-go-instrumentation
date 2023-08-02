@@ -19,6 +19,7 @@ import (
 
 	"go.opentelemetry.io/auto/pkg/instrumentors/allocator"
 	"go.opentelemetry.io/auto/pkg/instrumentors/bpf/github.com/gin-gonic/gin"
+	gorillaMux "go.opentelemetry.io/auto/pkg/instrumentors/bpf/github.com/gorilla/mux"
 	"go.opentelemetry.io/auto/pkg/instrumentors/bpf/google/golang/org/grpc"
 	grpcServer "go.opentelemetry.io/auto/pkg/instrumentors/bpf/google/golang/org/grpc/server"
 	httpServer "go.opentelemetry.io/auto/pkg/instrumentors/bpf/net/http/server"
@@ -28,18 +29,16 @@ import (
 	"go.opentelemetry.io/auto/pkg/process"
 )
 
-var (
-	// Error message returned when unable to find all instrumentation functions.
-	errNotAllFuncsFound = fmt.Errorf("not all functions found for instrumentation")
-)
+// Error message returned when unable to find all instrumentation functions.
+var errNotAllFuncsFound = fmt.Errorf("not all functions found for instrumentation")
 
 // Manager handles the management of [Instrumentor] instances.
 type Manager struct {
 	instrumentors  map[string]Instrumentor
 	done           chan bool
 	incomingEvents chan *events.Event
-	otelController *opentelemetry.Controller
 	allocator      *allocator.Allocator
+	otelController *opentelemetry.Controller
 }
 
 // NewManager returns a new [Manager].
@@ -47,7 +46,7 @@ func NewManager(otelController *opentelemetry.Controller) (*Manager, error) {
 	m := &Manager{
 		instrumentors:  make(map[string]Instrumentor),
 		done:           make(chan bool, 1),
-		incomingEvents: make(chan *events.Event),
+		incomingEvents: make(chan *events.Event, 10),
 		otelController: otelController,
 		allocator:      allocator.New(),
 	}
@@ -82,9 +81,9 @@ func (m *Manager) GetRelevantFuncs() map[string]interface{} {
 	return funcsMap
 }
 
-// FilterUnusedInstrumentors filterers Instrumentors whose functions are
+// filterUnusedInstrumentors filterers Instrumentors whose functions are
 // already instrumented out of the Manager.
-func (m *Manager) FilterUnusedInstrumentors(target *process.TargetDetails) {
+func (m *Manager) filterUnusedInstrumentors(target *process.TargetDetails) {
 	existingFuncMap := make(map[string]interface{})
 	for _, f := range target.Functions {
 		existingFuncMap[f.Name] = nil
@@ -100,7 +99,16 @@ func (m *Manager) FilterUnusedInstrumentors(target *process.TargetDetails) {
 
 		if funcsFound != len(inst.FuncNames()) {
 			if funcsFound > 0 {
-				log.Logger.Error(errNotAllFuncsFound, "some of expected functions not found - check instrumented functions", "instrumentation_name", name, "funcs_found", funcsFound, "funcs_expected", len(inst.FuncNames()))
+				log.Logger.Error(
+					errNotAllFuncsFound,
+					"some of expected functions not found - check instrumented functions",
+					"instrumentation_name",
+					name,
+					"funcs_found",
+					funcsFound,
+					"funcs_expected",
+					len(inst.FuncNames()),
+				)
 			}
 			delete(m.instrumentors, name)
 		}
@@ -112,7 +120,7 @@ func registerInstrumentors(m *Manager) error {
 		grpc.New(),
 		grpcServer.New(),
 		httpServer.New(),
-		//gorillaMux.New(),
+		gorillaMux.New(),
 		gin.New(),
 	}
 
