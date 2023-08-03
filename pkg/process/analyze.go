@@ -149,6 +149,11 @@ func (a *Analyzer) Analyze(pid int, relevantFuncs map[string]interface{}) (*Targ
 	result.GoVersion = goVersion
 	result.Libraries = modules
 
+	result.AllocationDetails, err = a.AllocateMemory(result)
+	if err != nil {
+		return nil, err
+	}
+
 	funcs, err := findFunctions(elfF, relevantFuncs)
 	if err != nil {
 		log.Logger.Error(err, "Failed to find functions")
