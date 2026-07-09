@@ -1,0 +1,20 @@
+name: PR Policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+  statuses: write
+
+jobs:
+  require-linear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: odigos-io/ci-core/require-linear@main
+
+  release-note:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: odigos-io/ci-core/require-release-note@main
