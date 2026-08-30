@@ -43,7 +43,6 @@ func (c *Controller) getTracer(libName string) trace.Tracer {
 }
 
 func (c *Controller) Trace(event *events.Event) {
-	log.Logger.V(0).Info("got event", "attrs", event.Attributes)
 	ctx := context.Background()
 
 	if event.SpanContext == nil {
@@ -56,7 +55,7 @@ func (c *Controller) Trace(event *events.Event) {
 		ctx = trace.ContextWithSpanContext(ctx, *event.ParentSpanContext)
 	}
 
-	ctx = ContextWithEbpfEvent(ctx, *event)
+	ctx = ContextWithEbpfEvent(ctx, event)
 	_, span := c.getTracer(event.Library).
 		Start(ctx, event.Name,
 			trace.WithAttributes(event.Attributes...),

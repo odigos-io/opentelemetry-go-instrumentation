@@ -35,6 +35,7 @@ type httpServerInstrumentor struct {
 	uprobe       link.Link
 	returnProbs  []link.Link
 	eventsReader *perf.Reader
+	sampleReader *bytes.Reader
 }
 
 func New() *httpServerInstrumentor {
@@ -142,7 +143,11 @@ func (h *httpServerInstrumentor) Run(eventsChan chan<- *events.Event) {
 			continue
 		}
 
-		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+		if h.sampleReader == nil {
+			h.sampleReader = bytes.NewReader(nil)
+		}
+		h.sampleReader.Reset(record.RawSample)
+		if err := binary.Read(h.sampleReader, binary.LittleEndian, &event); err != nil {
 			logger.Error(err, "error parsing perf event")
 			continue
 		}
