@@ -14,7 +14,7 @@ func NewEbpfSourceIDGenerator() *eBPFSourceIDGenerator {
 	return &eBPFSourceIDGenerator{}
 }
 
-func ContextWithEbpfEvent(ctx context.Context, event events.Event) context.Context {
+func ContextWithEbpfEvent(ctx context.Context, event *events.Event) context.Context {
 	return context.WithValue(ctx, ebpfEventKey{}, event)
 }
 
@@ -24,12 +24,12 @@ func EventFromContext(ctx context.Context) *events.Event {
 		return nil
 	}
 
-	event, ok := val.(events.Event)
+	event, ok := val.(*events.Event)
 	if !ok {
 		return nil
 	}
 
-	return &event
+	return event
 }
 
 func (e *eBPFSourceIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trace.SpanID) {
@@ -37,7 +37,7 @@ func (e *eBPFSourceIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trac
 	if event == nil || event.SpanContext == nil {
 		return trace.TraceID{}, trace.SpanID{}
 	}
-	
+
 	return event.SpanContext.TraceID(), event.SpanContext.SpanID()
 }
 

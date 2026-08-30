@@ -35,6 +35,7 @@ type gorillaMuxInstrumentor struct {
 	uprobe       link.Link
 	returnProbs  []link.Link
 	eventsReader *perf.Reader
+	sampleReader *bytes.Reader
 }
 
 func New() *gorillaMuxInstrumentor {
@@ -142,7 +143,11 @@ func (g *gorillaMuxInstrumentor) Run(eventsChan chan<- *events.Event) {
 			continue
 		}
 
-		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+		if g.sampleReader == nil {
+			g.sampleReader = bytes.NewReader(nil)
+		}
+		g.sampleReader.Reset(record.RawSample)
+		if err := binary.Read(g.sampleReader, binary.LittleEndian, &event); err != nil {
 			logger.Error(err, "error parsing perf event")
 			continue
 		}
